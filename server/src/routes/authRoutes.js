@@ -6,7 +6,9 @@ const {
   resendVerificationCode,
   loginCitizen,
   loginAdmin,
+  loginEmployee,
 } = require("../controllers/authController");
+
 
 const router = express.Router();
 
@@ -22,5 +24,7 @@ router.post("/login", loginCitizen);
 
 // Admin login
 router.post("/admin-login", loginAdmin);
+
+router.post("/employee-login", loginEmployee);
 
 module.exports = router;

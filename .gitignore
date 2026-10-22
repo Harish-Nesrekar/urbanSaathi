@@ -1,8 +1,24 @@
 
+# Dependencies
 node_modules/
+
+# Environment variables and secrets
 .env
-.env.local
-.env.*.local
-server/.env
-client/.env.local
+.env.*
+!.env.example
+
+# Next.js build output
 .next/
+client/.next/
+client/out/
+
+# Uploaded complaint images — keep them local for now
+server/uploads/*
+!server/uploads/.gitkeep
+
+# macOS files
+.DS_Store
+**/.DS_Store
+
+# Local test/download artifacts
+/curl
