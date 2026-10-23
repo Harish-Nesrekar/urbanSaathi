@@ -4,13 +4,10 @@ const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
 const { fileTypeFromBuffer } = require("file-type");
+const ImageKit = require("imagekit");
+const ImageKitClient = require("@imagekit/nodejs");
 
-const UPLOAD_DIR = path.resolve(
-  process.cwd(),
-  "uploads",
-  "complaints"
-);
-
+const UPLOAD_DIR = path.resolve(process.cwd(), "uploads", "complaints");
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 const ALLOWED_TYPES = new Set([
@@ -25,6 +22,36 @@ const EXTENSIONS = {
   "image/webp": ".webp",
 };
 
+// Existing SDK: uploads and file deletion.
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+});
+
+// New SDK: generate signed URLs for private image delivery.
+const imagekitClient = new ImageKitClient({
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+});
+
+function readStorageRecord(storagePath) {
+  try {
+    const value = JSON.parse(storagePath);
+
+    if (
+      value?.provider === "imagekit" &&
+      typeof value.fileId === "string" &&
+      typeof value.filePath === "string"
+    ) {
+      return value;
+    }
+  } catch {
+    // Existing local-disk records are supported below.
+  }
+
+  return null;
+}
+
 // POST /api/complaints/:complaintId/attachments
 exports.uploadAttachments = async (req, res) => {
   const files = req.files || [];
@@ -32,11 +59,13 @@ exports.uploadAttachments = async (req, res) => {
 
   let connection;
   let transactionStarted = false;
-  const savedFiles = [];
+  const uploadedFiles = [];
 
   try {
     if (!Number.isSafeInteger(complaintId) || complaintId <= 0) {
-      return res.status(400).json({ message: "Invalid complaint ID" });
+      return res.status(400).json({
+        message: "Invalid complaint ID",
+      });
     }
 
     if (files.length === 0) {
@@ -45,7 +74,6 @@ exports.uploadAttachments = async (req, res) => {
       });
     }
 
-    // Validate file size, declared MIME type, and actual file contents.
     const validatedFiles = [];
 
     for (const file of files) {
@@ -58,6 +86,7 @@ exports.uploadAttachments = async (req, res) => {
         });
       }
 
+      // Verify actual file contents, not only the supplied MIME type.
       const detected = await fileTypeFromBuffer(file.buffer);
 
       if (!detected || !ALLOWED_TYPES.has(detected.mime)) {
@@ -75,7 +104,7 @@ exports.uploadAttachments = async (req, res) => {
 
     connection = await db.getConnection();
 
-    // Confirm that the authenticated citizen owns this complaint.
+    // Only the citizen who owns the complaint can upload attachments.
     const [complaints] = await connection.query(
       `SELECT c.id
        FROM complaints c
@@ -91,21 +120,31 @@ exports.uploadAttachments = async (req, res) => {
       });
     }
 
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+    const attachmentRecords = [];
 
-    const attachmentRecords = validatedFiles.map((file) => ({
-      fileName: `${crypto.randomUUID()}${EXTENSIONS[file.mimeType]}`,
-      mimeType: file.mimeType,
-      size: file.size,
-      buffer: file.buffer,
-    }));
+    for (const file of validatedFiles) {
+      const fileName =
+        `${crypto.randomUUID()}${EXTENSIONS[file.mimeType]}`;
 
-    // Save images using generated filenames.
-    for (const file of attachmentRecords) {
-      const fullPath = path.join(UPLOAD_DIR, file.fileName);
+      const result = await imagekit.upload({
+        file: file.buffer,
+        fileName,
+        folder: "/urban-sathi/complaints",
+        isPrivateFile: true,
+      });
 
-      await fs.writeFile(fullPath, file.buffer, { flag: "wx" });
-      savedFiles.push(fullPath);
+      uploadedFiles.push(result.fileId);
+
+      attachmentRecords.push({
+        fileName,
+        mimeType: file.mimeType,
+        size: file.size,
+        storagePath: JSON.stringify({
+          provider: "imagekit",
+          fileId: result.fileId,
+          filePath: result.filePath,
+        }),
+      });
     }
 
     await connection.beginTransaction();
@@ -114,11 +153,6 @@ exports.uploadAttachments = async (req, res) => {
     const attachments = [];
 
     for (const file of attachmentRecords) {
-      const storagePath = path.relative(
-        process.cwd(),
-        path.join(UPLOAD_DIR, file.fileName)
-      );
-
       const [result] = await connection.query(
         `INSERT INTO complaint_attachments
           (complaint_id, file_name, storage_path, mime_type, file_size_bytes)
@@ -126,7 +160,7 @@ exports.uploadAttachments = async (req, res) => {
         [
           complaintId,
           file.fileName,
-          storagePath,
+          file.storagePath,
           file.mimeType,
           file.size,
         ]
@@ -152,14 +186,22 @@ exports.uploadAttachments = async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error("Attachment rollback error:", rollbackError.message);
+        console.error(
+          "Attachment rollback error:",
+          rollbackError.message
+        );
       }
     }
 
-    // Remove saved files if the operation failed.
+    // Remove uploaded cloud files if the operation failed.
     await Promise.all(
-      savedFiles.map((filePath) =>
-        fs.unlink(filePath).catch(() => {})
+      uploadedFiles.map((fileId) =>
+        imagekit.deleteFile(fileId).catch((cleanupError) => {
+          console.error(
+            "ImageKit cleanup error:",
+            cleanupError.message
+          );
+        })
       )
     );
 
@@ -194,7 +236,9 @@ exports.getAttachment = async (req, res) => {
       !Number.isSafeInteger(attachmentId) ||
       attachmentId <= 0
     ) {
-      return res.status(400).json({ message: "Invalid ID" });
+      return res.status(400).json({
+        message: "Invalid ID",
+      });
     }
 
     const [rows] = await db.query(
@@ -219,43 +263,40 @@ exports.getAttachment = async (req, res) => {
 
     const attachment = rows[0];
 
-    // Citizens can only view their own complaint images.
-    // Admins must still authenticate through the route middleware.
-    // Citizens can only view their own complaint images.
-if (
-  req.user.role === "CITIZEN" &&
-  Number(attachment.citizen_user_id) !== Number(req.user.id)
-) {
-  return res.status(404).json({
-    message: "Image not found",
-  });
-}
+    // Citizens can access only images attached to their own complaints.
+    if (
+      req.user.role === "CITIZEN" &&
+      Number(attachment.citizen_user_id) !== Number(req.user.id)
+    ) {
+      return res.status(404).json({
+        message: "Image not found",
+      });
+    }
 
-// Employees can only view images for complaints assigned
-// to their active department.
-if (req.user.role === "EMPLOYEE") {
-  const [employeeRows] = await db.query(
-    `SELECT e.department_id
-     FROM employees e
-     INNER JOIN departments d ON d.id = e.department_id
-     INNER JOIN users u ON u.id = e.user_id
-     INNER JOIN complaints c ON c.department_id = d.id
-     WHERE e.user_id = ?
-       AND c.id = ?
-       AND e.is_active = 1
-       AND d.is_active = 1
-       AND u.role = 'EMPLOYEE'
-       AND u.status = 'ACTIVE'
-     LIMIT 1`,
-    [req.user.id, complaintId]
-  );
+    // Employees must be active and belong to the complaint's department.
+    if (req.user.role === "EMPLOYEE") {
+      const [employeeRows] = await db.query(
+        `SELECT e.department_id
+         FROM employees e
+         INNER JOIN departments d ON d.id = e.department_id
+         INNER JOIN users u ON u.id = e.user_id
+         INNER JOIN complaints c ON c.department_id = d.id
+         WHERE e.user_id = ?
+           AND c.id = ?
+           AND e.is_active = 1
+           AND d.is_active = 1
+           AND u.role = 'EMPLOYEE'
+           AND u.status = 'ACTIVE'
+         LIMIT 1`,
+        [req.user.id, complaintId]
+      );
 
-  if (employeeRows.length === 0) {
-    return res.status(404).json({
-      message: "Image not found",
-    });
-  }
-}
+      if (employeeRows.length === 0) {
+        return res.status(404).json({
+          message: "Image not found",
+        });
+      }
+    }
 
     if (!ALLOWED_TYPES.has(attachment.mime_type)) {
       return res.status(404).json({
@@ -263,12 +304,51 @@ if (req.user.role === "EMPLOYEE") {
       });
     }
 
+    const cloudFile = readStorageRecord(attachment.storage_path);
+
+    if (cloudFile) {
+      // Generate a signed URL using the newer ImageKit SDK.
+      const signedUrl = imagekitClient.helper.buildSrc({
+        urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+        src: cloudFile.filePath,
+        signed: true,
+      });
+
+      const imageResponse = await fetch(signedUrl);
+
+      if (!imageResponse.ok) {
+        // Log the upstream status for debugging without exposing
+        // signed URLs or credentials.
+        console.error(
+          "ImageKit image delivery failed:",
+          imageResponse.status
+        );
+
+        return res.status(502).json({
+          message: "Unable to retrieve complaint image from storage",
+        });
+      }
+
+      const imageBuffer = Buffer.from(
+        await imageResponse.arrayBuffer()
+      );
+
+      res.set({
+        "Content-Type": attachment.mime_type,
+        "Content-Disposition": "inline",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      });
+
+      return res.status(200).send(imageBuffer);
+    }
+
+    // Backward compatibility for attachments saved on local disk.
     const filePath = path.resolve(
       process.cwd(),
       attachment.storage_path
     );
 
-    // Prevent stored paths from escaping the upload directory.
     if (!filePath.startsWith(UPLOAD_DIR + path.sep)) {
       return res.status(404).json({
         message: "Image not found",
