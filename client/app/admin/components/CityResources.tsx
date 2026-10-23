@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const API = "http://localhost:5001/api/admin/resources";
+const API = `${process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5001"}/api/admin/resources`;
 
 type Resource = {
   id: number;

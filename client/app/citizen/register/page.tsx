@@ -1360,7 +1360,7 @@ export default function CitizenRegister() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:5001/api/auth/register", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}/api/auth/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1405,7 +1405,7 @@ export default function CitizenRegister() {
 
     try {
       const response = await fetch(
-        "http://localhost:5001/api/auth/verify-email",
+        `${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}/api/auth/verify-email`,
         {
           method: "POST",
           headers: {
@@ -1447,7 +1447,7 @@ export default function CitizenRegister() {
 
     try {
       const response = await fetch(
-        "http://localhost:5001/api/auth/resend-verification",
+        `${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}/api/auth/resend-verification`,
         {
           method: "POST",
           headers: {
