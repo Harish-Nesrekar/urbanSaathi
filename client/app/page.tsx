@@ -14,7 +14,7 @@ type StraightVehicle = {
   wheels: THREE.Mesh[];
   waypoints: THREE.Vector3[];
   legIndex: number;
-  legProgress: number; // 0 to 1 along current segment
+  legProgress: number;
   speed: number;
 };
 
@@ -149,6 +149,46 @@ function createBuilding(
   return bldg;
 }
 
+function createGuardCharacter(): THREE.Group {
+  const guard = new THREE.Group();
+
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x0f172a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.6, 0.25), bodyMat);
+  body.position.y = 0.5;
+  body.castShadow = true;
+  guard.add(body);
+
+  const headMat = new THREE.MeshLambertMaterial({ color: 0xfbcfe8 });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), headMat);
+  head.position.y = 0.9;
+  head.castShadow = true;
+  guard.add(head);
+
+  const capMat = new THREE.MeshLambertMaterial({ color: 0x0284c7 });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.08, 12), capMat);
+  cap.position.y = 1.05;
+  guard.add(cap);
+
+  const visorMat = new THREE.MeshLambertMaterial({ color: 0x0f172a });
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.1), visorMat);
+  visor.position.set(0, 1.03, 0.12);
+  guard.add(visor);
+
+  const vestMat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.35, 0.27), vestMat);
+  vest.position.y = 0.52;
+  guard.add(vest);
+
+  const armMat = new THREE.MeshLambertMaterial({ color: 0x0f172a });
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4), armMat);
+  arm.position.set(-0.24, 0.65, 0);
+  arm.rotation.z = -Math.PI / 4;
+  guard.add(arm);
+
+  guard.position.set(0, 0.45, 5);
+  return guard;
+}
+
 function createPedestrian(shirtColor: number, pantsColor: number): {
   group: THREE.Group;
   leftLeg: THREE.Mesh;
@@ -210,14 +250,12 @@ function createVehicle(type: "car" | "van", bodyColor: number): { group: THREE.G
   const h = type === "van" ? 0.62 : 0.42;
   const l = type === "van" ? 1.45 : 1.22;
 
-  // Chassis / Lower body
   const bodyMat = new THREE.MeshLambertMaterial({ color: bodyColor });
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), bodyMat);
   body.position.y = h / 2 + 0.14;
   body.castShadow = true;
   group.add(body);
 
-  // Cabin / Top roof
   const cabinH = type === "van" ? 0.22 : 0.28;
   const cabinL = type === "van" ? 0.75 : 0.72;
   const cabinMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -226,13 +264,11 @@ function createVehicle(type: "car" | "van", bodyColor: number): { group: THREE.G
   cabin.castShadow = true;
   group.add(cabin);
 
-  // Windshield (facing forward along +Z)
   const glassMat = new THREE.MeshLambertMaterial({ color: 0x38bdf8 });
   const windshield = new THREE.Mesh(new THREE.BoxGeometry(w * 0.86, cabinH * 0.8, 0.04), glassMat);
   windshield.position.set(0, cabin.position.y, cabin.position.z + cabinL / 2 + 0.01);
   group.add(windshield);
 
-  // Headlights
   const lightMat = new THREE.MeshBasicMaterial({ color: 0xfffbeb });
   const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.04), lightMat);
   hlL.position.set(-w * 0.32, body.position.y, l / 2 + 0.02);
@@ -240,7 +276,6 @@ function createVehicle(type: "car" | "van", bodyColor: number): { group: THREE.G
   hlR.position.x = w * 0.32;
   group.add(hlL, hlR);
 
-  // Taillights (red)
   const tailMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
   const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.04), tailMat);
   tlL.position.set(-w * 0.32, body.position.y, -l / 2 - 0.01);
@@ -248,7 +283,6 @@ function createVehicle(type: "car" | "van", bodyColor: number): { group: THREE.G
   tlR.position.x = w * 0.32;
   group.add(tlL, tlR);
 
-  // Wheels
   const wheelGeom = new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12);
   wheelGeom.rotateZ(Math.PI / 2);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
@@ -272,10 +306,10 @@ function createVehicle(type: "car" | "van", bodyColor: number): { group: THREE.G
 }
 
 /* =========================================================
-   3D FULLSCREEN BACKGROUND DIORAMA
+   SCROLL-DRIVEN & MOUSE PARALLAX 3D CITY CANVAS
 ========================================================= */
 
-function FullscreenCityCanvas({
+function ScrollableCityCanvas({
   canvasRef,
 }: {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -291,7 +325,10 @@ function FullscreenCityCanvas({
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0xf6f9fc);
 
-      const aspect = window.innerWidth / window.innerHeight;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const aspect = width / height;
+
       const d = 14.5;
       const camera = new THREE.OrthographicCamera(
         -d * aspect,
@@ -312,9 +349,8 @@ function FullscreenCityCanvas({
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(width, height);
 
-      /* Lights */
       const ambientLight = new THREE.AmbientLight(0xfff7ed, 1.4);
       scene.add(ambientLight);
 
@@ -331,10 +367,13 @@ function FullscreenCityCanvas({
       scene.add(fillLight);
 
       const cityRoot = new THREE.Group();
-      cityRoot.position.set(-3.5, -0.5, -1.8);
+      cityRoot.position.set(0, -0.5, 0);
       scene.add(cityRoot);
 
-      /* Ground Base & Multi-Road Grid */
+      // Add Municipal Guard
+      const guard = createGuardCharacter();
+      cityRoot.add(guard);
+
       const slabMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
       const slab = new THREE.Mesh(new THREE.BoxGeometry(26, 0.8, 26), slabMat);
       slab.position.y = 0;
@@ -362,7 +401,6 @@ function FullscreenCityCanvas({
         });
       });
 
-      // Dashed lane dividers
       const dashMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       const dashGeom = new THREE.PlaneGeometry(0.12, 0.6);
       dashGeom.rotateX(-Math.PI / 2);
@@ -392,7 +430,6 @@ function FullscreenCityCanvas({
       addDividersX(-3.9);
       addDividersX(3.9);
 
-      // Crosswalks
       const zebraMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       const createCrosswalk = (cx: number, cz: number, horizontal: boolean) => {
         for (let i = -0.9; i <= 0.9; i += 0.38) {
@@ -415,7 +452,6 @@ function FullscreenCityCanvas({
         });
       });
 
-      /* Buildings */
       cityRoot.add(createBuilding(2.4, 4.8, 2.4, 0xf1f5f9, 0x0284c7, 0xf97316).translateOnAxis(new THREE.Vector3(-8.5, 0.55, -8.5), 1));
       cityRoot.add(createBuilding(2.0, 3.2, 2.0, 0x38bdf8, 0x0369a1).translateOnAxis(new THREE.Vector3(-6.8, 0.55, -6.8), 1));
       cityRoot.add(createBuilding(3.2, 3.8, 2.2, 0xffffff, 0x10b981).translateOnAxis(new THREE.Vector3(0, 0.55, -7.8), 1));
@@ -430,7 +466,6 @@ function FullscreenCityCanvas({
       cityRoot.add(createBuilding(2.8, 5.0, 2.8, 0xf1f5f9, 0x0284c7).translateOnAxis(new THREE.Vector3(8.2, 0.55, 8.2), 1));
       cityRoot.add(createBuilding(2.0, 2.8, 2.0, 0x34d399, 0x059669).translateOnAxis(new THREE.Vector3(6.6, 0.55, 6.8), 1));
 
-      // Trees
       const treeCoords = [
         [-11.5, -11.5, 1.1],
         [-11.5, 0, 0.95],
@@ -447,7 +482,6 @@ function FullscreenCityCanvas({
       ];
       treeCoords.forEach(([x, z, s]) => cityRoot.add(createTree(x, z, s)));
 
-      // Street lamps
       const lampSpots = [
         [-4.8, -4.8, 0],
         [-3.0, -3.0, Math.PI],
@@ -460,7 +494,6 @@ function FullscreenCityCanvas({
       ];
       lampSpots.forEach(([x, z, rot]) => cityRoot.add(createStreetLamp(x, z, rot)));
 
-      /* Pedestrians */
       const pedestrianPool: Pedestrian[] = [];
       const personColors = [
         { shirt: 0xef4444, pants: 0x1e293b },
@@ -503,10 +536,6 @@ function FullscreenCityCanvas({
         });
       });
 
-      /* =========================================================
-         100% STRAIGHT ORTHOGONAL VEHICLE PATHS (NO DIAGONALS)
-      ========================================================= */
-      // Lane 1: Outer Counter-Clockwise Loop (Strictly horizontal and vertical segments)
       const loop1: THREE.Vector3[] = [
         new THREE.Vector3(-11.5, 0.44, -3.3),
         new THREE.Vector3(11.5, 0.44, -3.3),
@@ -514,7 +543,6 @@ function FullscreenCityCanvas({
         new THREE.Vector3(-11.5, 0.44, 4.5),
       ];
 
-      // Lane 2: Inner Clockwise Loop
       const loop2: THREE.Vector3[] = [
         new THREE.Vector3(-3.3, 0.44, -11.5),
         new THREE.Vector3(-3.3, 0.44, 11.5),
@@ -522,7 +550,6 @@ function FullscreenCityCanvas({
         new THREE.Vector3(4.5, 0.44, -11.5),
       ];
 
-      // Lane 3: Perimeter Service Boulevard
       const loop3: THREE.Vector3[] = [
         new THREE.Vector3(11.5, 0.44, -4.5),
         new THREE.Vector3(-11.5, 0.44, -4.5),
@@ -546,12 +573,10 @@ function FullscreenCityCanvas({
         const initialLeg = i % route.length;
         const initialProgress = ((i * 0.33) % 1);
 
-        // Position at start
         const startPt = route[initialLeg];
         const nextPt = route[(initialLeg + 1) % route.length];
         carGroup.position.lerpVectors(startPt, nextPt, initialProgress);
 
-        // Point strictly forward along segment
         const dir = new THREE.Vector3().subVectors(nextPt, startPt).normalize();
         const angle = Math.atan2(dir.x, dir.z);
         carGroup.rotation.y = angle;
@@ -562,48 +587,69 @@ function FullscreenCityCanvas({
           waypoints: route,
           legIndex: initialLeg,
           legProgress: initialProgress,
-          speed: 0.016 + (i % 3) * 0.003, // Calm, smooth driving speed
+          speed: 0.016 + (i % 3) * 0.003,
         });
       }
 
-      /* Cursor Tilt & Resize */
+      /* Scroll & Mouse Interactivity Parameters */
+      let scrollProgress = 0;
       let mouseX = 0;
       let mouseY = 0;
-      let targetRotX = 0;
-      let targetRotY = 0;
+      let mouseTiltX = 0;
+      let mouseTiltY = 0;
+
+      const handleScroll = () => {
+        const scrollMax = document.documentElement.scrollHeight - window.innerHeight;
+        if (scrollMax <= 0) return;
+        scrollProgress = window.scrollY / scrollMax;
+      };
 
       const handleMouseMove = (e: MouseEvent) => {
         mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
         mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
-        targetRotY = mouseX * 0.08;
-        targetRotX = mouseY * 0.05;
+        mouseTiltY = mouseX * 0.12;
+        mouseTiltX = mouseY * 0.08;
       };
 
       const handleResize = () => {
-        const curAspect = window.innerWidth / window.innerHeight;
+        const curWidth = window.innerWidth;
+        const curHeight = window.innerHeight;
+        const curAspect = curWidth / curHeight;
+
         camera.left = -d * curAspect;
         camera.right = d * curAspect;
         camera.top = d;
         camera.bottom = -d;
         camera.updateProjectionMatrix();
-        renderer?.setSize(window.innerWidth, window.innerHeight);
+
+        if (renderer) {
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          renderer.setSize(curWidth, curHeight);
+        }
       };
 
+      window.addEventListener("scroll", handleScroll, { passive: true });
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("resize", handleResize);
 
-      /* Animation Loop */
       const animate = () => {
-        cityRoot.rotation.y += (targetRotY - cityRoot.rotation.y) * 0.04;
-        cityRoot.rotation.x += (targetRotX - cityRoot.rotation.x) * 0.04;
+        const targetRotY = scrollProgress * Math.PI * 1.2 + mouseTiltY;
+        const targetRotX = mouseTiltX;
+        const targetCamY = 30 - scrollProgress * 14;
+        const targetCamZ = 30 - scrollProgress * 10;
 
-        // Drive Vehicles 100% straight along road segments
+        cityRoot.rotation.y += (targetRotY - cityRoot.rotation.y) * 0.05;
+        cityRoot.rotation.x += (targetRotX - cityRoot.rotation.x) * 0.05;
+
+        camera.position.y += (targetCamY - camera.position.y) * 0.05;
+        camera.position.z += (targetCamZ - camera.position.z) * 0.05;
+        camera.lookAt(0, 0, 0);
+
         vehicles.forEach((v) => {
           const fromPt = v.waypoints[v.legIndex];
           const toPt = v.waypoints[(v.legIndex + 1) % v.waypoints.length];
           const segmentLen = fromPt.distanceTo(toPt);
 
-          // Advance progress linearly
           v.legProgress += v.speed / segmentLen;
 
           if (v.legProgress >= 1) {
@@ -614,21 +660,17 @@ function FullscreenCityCanvas({
           const curFrom = v.waypoints[v.legIndex];
           const curTo = v.waypoints[(v.legIndex + 1) % v.waypoints.length];
 
-          // Linear straight interpolation
           v.group.position.lerpVectors(curFrom, curTo, v.legProgress);
 
-          // Face precisely in direction of current segment
           const dirX = curTo.x - curFrom.x;
           const dirZ = curTo.z - curFrom.z;
           v.group.rotation.y = Math.atan2(dirX, dirZ);
 
-          // Spin wheels
           v.wheels.forEach((w) => {
             w.rotation.x += v.speed * 4.5;
           });
         });
 
-        // Walk Pedestrians
         pedestrianPool.forEach((p) => {
           p.stepPhase += 0.05;
           const swing = Math.sin(p.stepPhase) * 0.4;
@@ -659,6 +701,7 @@ function FullscreenCityCanvas({
 
       return () => {
         cancelAnimationFrame(animationFrame);
+        window.removeEventListener("scroll", handleScroll);
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("resize", handleResize);
         renderer?.dispose();
@@ -672,7 +715,7 @@ function FullscreenCityCanvas({
 }
 
 /* =========================================================
-   PAGE COMPONENT
+   PAGE COMPONENT: UNIFIED LOGIN WITH SCROLL JOURNEY
 ========================================================= */
 
 export default function UnifiedLoginPage() {
@@ -690,7 +733,7 @@ export default function UnifiedLoginPage() {
   const roleDetails = {
     CITIZEN: {
       title: "Citizen Portal",
-      subtitle: "Report civic issues and track your complaints.",
+      subtitle: "Report civic issues and track your complaints in real time.",
       emailLabel: "Email address",
       placeholder: "you@gmail.com",
       button: "Sign in as Citizen",
@@ -700,9 +743,9 @@ export default function UnifiedLoginPage() {
     },
     EMPLOYEE: {
       title: "Employee Portal",
-      subtitle: "Manage complaints assigned to your department.",
+      subtitle: "Manage and resolve complaints assigned to your department.",
       emailLabel: "Employee email",
-      placeholder: "employee@example.com",
+      placeholder: "employee@urbansathi.com",
       button: "Sign in as Employee",
       endpoint: "/api/auth/employee-login",
       destination: "/employee/dashboard",
@@ -710,7 +753,7 @@ export default function UnifiedLoginPage() {
     },
     ADMIN: {
       title: "Administration Portal",
-      subtitle: "Manage departments, citizens, and civic complaints.",
+      subtitle: "Oversee departments, city staff, and municipal metrics.",
       emailLabel: "Administrator email",
       placeholder: "admin@urbansathi.com",
       button: "Sign in as Admin",
@@ -749,7 +792,6 @@ export default function UnifiedLoginPage() {
         throw new Error("The server did not return an authentication token.");
       }
 
-      // Require the server to identify the account role before creating a session.
       const actualRole = data.user?.role as string | undefined;
       if (!actualRole || actualRole !== role) {
         throw new Error(
@@ -759,8 +801,6 @@ export default function UnifiedLoginPage() {
         );
       }
 
-      // Keep each role's session separate so logging in to one portal
-      // does not overwrite or remove another role's session in another tab.
       if (role === "CITIZEN") {
         localStorage.setItem("citizenToken", data.token);
         sessionStorage.removeItem("citizenToken");
@@ -786,366 +826,268 @@ export default function UnifiedLoginPage() {
     }
   };
 
+  const scrollToSignIn = () => {
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: "smooth",
+    });
+  };
+
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#f6f9fc]">
+    <main className="relative min-h-[400vh] bg-[#f6f9fc] selection:bg-[#0875c9] selection:text-white">
+      {/* 3D Background Canvas */}
       <canvas
         ref={canvasRef}
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 z-0 h-full w-full"
       />
-      <FullscreenCityCanvas canvasRef={canvasRef} />
+      <ScrollableCityCanvas canvasRef={canvasRef} />
 
-      <div className="pointer-events-none fixed inset-0 z-[1] bg-gradient-to-l from-[#f6f9fc]/95 via-[#f6f9fc]/60 to-[#f6f9fc]/20" />
-      <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
-        <div className="animate-float-slow absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[#0b4f9c]/10 blur-3xl" />
-        <div className="animate-float absolute -bottom-40 -right-32 h-[500px] w-[500px] rounded-full bg-[#39b54a]/10 blur-3xl" />
-        <div className="absolute left-[45%] top-[15%] h-40 w-40 animate-pulse rounded-full bg-[#00a8e8]/5 blur-3xl" />
-      </div>
+      <div className="pointer-events-none fixed inset-0 z-[1] bg-gradient-to-b from-[#f6f9fc]/80 via-transparent to-[#f6f9fc]/90" />
 
-      <div className="relative z-10 grid min-h-screen grid-cols-1 items-center gap-10 px-5 py-10 sm:px-10 lg:grid-cols-2 lg:px-16 xl:px-24">
-        <section className="mx-auto w-full max-w-xl text-center lg:mx-0 lg:text-left">
-          <img
-            src="/logo.png"
-            alt="UrbanSathi"
-            className="mx-auto mb-7 w-[170px] object-contain drop-shadow sm:w-[190px] lg:mx-0"
-          />
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#39b54a]/20 bg-[#e8f7ec] px-4 py-1.5 shadow-sm">
+      {/* Top Header */}
+      <header className="fixed inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-5 lg:px-16 backdrop-blur-md bg-white/50 border-b border-slate-200/40">
+        <div className="flex items-center gap-3">
+          
+          <span className="hidden text-xs font-semibold uppercase tracking-widest text-slate-500 sm:inline-block">
+            Smart Municipal Network
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/20">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+            System Live
+          </span>
+          <button
+            onClick={scrollToSignIn}
+            className="rounded-full bg-[#0875c9] px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0b4f9c]"
+          >
+            Sign In
+          </button>
+        </div>
+      </header>
+
+      {/* STAGE 1: CLEAR 3D CITY + GUARD Speech Bubble (0% Scroll) */}
+      <section className="relative z-10 flex min-h-screen flex-col items-center justify-end pb-16 text-center">
+        {/* Speech Bubble from Municipal Guard */}
+        <div className="relative mb-6 rounded-2xl border border-white/90 bg-white/90 px-6 py-3.5 shadow-[0_15px_40px_rgba(10,40,80,0.12)] backdrop-blur-xl animate-bounce">
+          <p className="text-xs font-bold text-[#10233f]">
+            👮‍♂️ City Patrol: "Welcome to UrbanSathi! Scroll down to enter!"
+          </p>
+          <div className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-white/90 bg-white/90" />
+        </div>
+
+        <div className="flex flex-col items-center gap-1.5 text-xs font-semibold text-[#0875c9]">
+          <span>Scroll down to enter city portal</span>
+          <svg className="h-4 w-4 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </section>
+
+      {/* STAGE 2: WELCOME HERO CARD (Scroll Screen 2) */}
+      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
+        <div className="max-w-3xl rounded-3xl border border-white/80 bg-white/75 p-8 shadow-[0_20px_60px_rgba(10,40,80,0.1)] backdrop-blur-2xl sm:p-12">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#39b54a]/20 bg-[#e8f7ec] px-4 py-1.5">
             <span className="h-2 w-2 rounded-full bg-[#39b54a]" />
-            <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#16852b]">
-              {selectedRole.title}
+            <span className="text-xs font-bold uppercase tracking-widest text-[#16852b]">
+              UrbanSathi Platform
             </span>
           </div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-[#10233f] sm:text-5xl xl:text-6xl">
+          <h1 className="text-4xl font-extrabold tracking-tight text-[#10233f] sm:text-6xl">
             Welcome to UrbanSathi
           </h1>
-          <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-600 sm:text-base lg:mx-0">
-            One place to connect citizens, city employees, and administrators
-            for a better-managed city.
+          <p className="mx-auto mt-4 max-w-xl text-base text-slate-600 sm:text-lg">
+            One unified platform connecting citizens, municipal staff, and city leaders for a cleaner, smarter, better-managed city.
           </p>
-          <div className="mt-7 hidden items-center gap-3 text-sm text-slate-600 lg:flex">
-            <ShieldIcon />
-            <span>Secure access tailored to your role</span>
-          </div>
-        </section>
 
-        <section className="mx-auto w-full max-w-[460px]">
-          <div className="animate-slide-up rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-[0_25px_70px_rgba(10,40,80,0.15)] backdrop-blur-md sm:p-8">
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-[#10233f]">Sign in</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Choose your account type to continue.
-              </p>
-            </div>
-
-            <div
-              role="tablist"
-              aria-label="Choose account type"
-              className="mb-6 grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1"
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <button
+              onClick={scrollToSignIn}
+              className="rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-[#0875c9]/25 transition hover:brightness-105"
             >
-              {([
-                ["CITIZEN", "Citizen"],
-                ["EMPLOYEE", "Employee"],
-                ["ADMIN", "Admin"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={role === value}
-                  onClick={() => {
-                    setRole(value);
-                    setError("");
-                  }}
-                  className={`rounded-xl px-2 py-3 text-sm font-semibold transition ${
-                    role === value
-                      ? "bg-white text-[#0875c9] shadow-sm ring-1 ring-slate-200"
-                      : "text-slate-500 hover:text-[#203653]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              Sign In to Your Account
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* STAGE 3: INTERACTIVE CIVIC METRICS (Scroll Screen 3) */}
+      <section className="relative z-10 flex min-h-screen items-center justify-center px-6">
+        <div className="w-full max-w-4xl rounded-3xl border border-white/80 bg-white/75 p-8 shadow-[0_25px_70px_rgba(10,40,80,0.1)] backdrop-blur-2xl sm:p-12">
+          <div className="text-center">
+            <span className="text-xs font-bold uppercase tracking-widest text-[#0875c9]">
+              Real-Time Civic Infrastructure
+            </span>
+            <h2 className="mt-2 text-3xl font-extrabold text-[#10233f] sm:text-4xl">
+              Smarter City Operations
+            </h2>
+            <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
+              Explore how UrbanSathi streamlines municipal complaints, dispatches field employees, and maintains operational transparency.
+            </p>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
+            <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
+              <p className="text-3xl font-bold text-[#0875c9]">98.4%</p>
+              <p className="mt-1 text-xs font-semibold text-[#10233f]">Resolution Rate</p>
+              <p className="mt-1 text-[11px] text-slate-500">Over 12,000 resolved civic tickets</p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
+              <p className="text-3xl font-bold text-[#39b54a]">24/7</p>
+              <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Dispatch</p>
+              <p className="mt-1 text-[11px] text-slate-500">Automated employee routing</p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
+              <p className="text-3xl font-bold text-[#10233f]">15k+</p>
+              <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Citizens</p>
+              <p className="mt-1 text-[11px] text-slate-500">Engaged urban community</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* STAGE 4: UNIFIED SIGN-IN PORTAL (Scroll Screen 4 - Bottom) */}
+      <section className="relative z-10 flex min-h-screen items-center justify-center px-5 py-20">
+        <div className="w-full max-w-[460px] rounded-3xl border border-white/90 bg-white/90 p-6 shadow-[0_30px_90px_rgba(10,40,80,0.15)] backdrop-blur-2xl sm:p-8">
+          <div className="mb-6 text-center">
+            <h2 className="text-2xl font-bold tracking-tight text-[#10233f]">Sign in to UrbanSathi</h2>
+            <p className="mt-1 text-xs text-slate-500">Choose your account type to continue</p>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Choose account type"
+            className="mb-6 grid grid-cols-3 gap-1.5 rounded-2xl bg-slate-100/80 p-1.5 backdrop-blur-sm"
+          >
+            {([
+              ["CITIZEN", "Citizen"],
+              ["EMPLOYEE", "Employee"],
+              ["ADMIN", "Admin"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={role === value}
+                onClick={() => {
+                  setRole(value);
+                  setError("");
+                }}
+                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold transition-all duration-200 ${
+                  role === value
+                    ? "bg-white text-[#0875c9] shadow-[0_2px_10px_rgba(0,0,0,0.06)] ring-1 ring-slate-200/80"
+                    : "text-slate-500 hover:text-[#203653]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <p className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs font-medium text-slate-600">
+            {selectedRole.subtitle}
+          </p>
+
+          {error && (
+            <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label
+                htmlFor="login-email"
+                className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+              >
+                {selectedRole.emailLabel}
+              </label>
+              <input
+                id="login-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={selectedRole.placeholder}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+              />
             </div>
 
-            <p className="mb-5 text-sm leading-6 text-slate-500">
-              {selectedRole.subtitle}
-            </p>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="text-left">
-                <label
-                  htmlFor="login-email"
-                  className="mb-2 block text-sm font-semibold text-[#203653]"
-                >
-                  {selectedRole.emailLabel}
-                </label>
-                <div className="group relative">
-                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#0875c9]">
-                    <MailIcon />
-                  </div>
-                  <input
-                    id="login-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={selectedRole.placeholder}
-                    required
-                    autoComplete="username"
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50/70 pl-12 pr-4 text-[15px] text-[#10233f] outline-none transition-all duration-300 placeholder:text-slate-400 hover:border-slate-300 focus:border-[#0875c9] focus:bg-white focus:ring-4 focus:ring-[#0875c9]/10"
-                  />
-                </div>
-              </div>
-
-              <div className="text-left">
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
                 <label
                   htmlFor="login-password"
-                  className="mb-2 block text-sm font-semibold text-[#203653]"
+                  className="text-xs font-semibold uppercase tracking-wider text-slate-600"
                 >
                   Password
                 </label>
-                <div className="group relative">
-                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#0875c9]">
-                    <LockIcon />
-                  </div>
-                  <input
-                    id="login-password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    required
-                    autoComplete="current-password"
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50/70 pl-12 pr-12 text-[15px] text-[#10233f] outline-none transition-all duration-300 placeholder:text-slate-400 hover:border-slate-300 focus:border-[#0875c9] focus:bg-white focus:ring-4 focus:ring-[#0875c9]/10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-[#0875c9]"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <div
-                  role="alert"
-                  className="animate-error flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600"
+                <a
+                  href="/forgot-password"
+                  className="text-xs font-medium text-[#0875c9] hover:underline"
                 >
-                  <div className="mt-0.5">
-                    <ErrorIcon />
-                  </div>
-                  <p>{error}</p>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="group relative mt-2 h-14 w-full overflow-hidden rounded-2xl bg-gradient-to-r from-[#07539a] via-[#0875c9] to-[#13a66a] font-semibold text-white shadow-lg shadow-[#0875c9]/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[#0875c9]/25 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <span className="absolute inset-0 -translate-x-full bg-white/15 transition-transform duration-700 group-hover:translate-x-full" />
-                <span className="relative flex items-center justify-center gap-3">
-                  {loading ? (
-                    <>
-                      <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      Signing in...
-                    </>
-                  ) : (
-                    <>
-                      {selectedRole.button}
-                      <ArrowIcon />
-                    </>
-                  )}
-                </span>
-              </button>
-            </form>
-
-            {role === "CITIZEN" ? (
-              <div className="mt-7 border-t border-slate-100 pt-6 text-center">
-                <p className="text-sm text-slate-500">
-                  Don&apos;t have an account?
-                  <button
-                    type="button"
-                    onClick={() => router.push("/citizen/register")}
-                    className="ml-1.5 font-semibold text-[#0875c9] transition hover:text-[#13a66a]"
-                  >
-                    Create account
-                  </button>
-                </p>
+                  Forgot password?
+                </a>
               </div>
-            ) : (
-              <p className="mt-7 border-t border-slate-100 pt-6 text-center text-xs leading-5 text-slate-500">
-                {selectedRole.helper}
+              <div className="relative">
+                <input
+                  id="login-password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-11 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 hover:text-slate-600 focus:outline-none"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-70"
+            >
+              {loading ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <>
+                  <span>{selectedRole.button}</span>
+                  <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                </>
+              )}
+            </button>
+          </form>
+
+          {role === "CITIZEN" && (
+            <div className="mt-6 text-center">
+              <p className="text-xs text-slate-500">
+                Don't have an account?{" "}
+                <a href="/register" className="font-semibold text-[#0875c9] hover:underline">
+                  Create account
+                </a>
               </p>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="mt-5 flex items-center justify-center gap-2 text-xs text-slate-400">
-            <ShieldIcon />
-            <span>Your account is securely protected</span>
+          <div className="mt-6 border-t border-slate-100 pt-4 text-center">
+            <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+              <svg className="h-3 w-3 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+              </svg>
+              Your session is securely encrypted & protected
+            </p>
           </div>
-        </section>
-      </div>
-
-      <style jsx>{`
-        @keyframes float {
-          0%, 100% { transform: translate3d(0, 0, 0); }
-          50% { transform: translate3d(0, -18px, 0); }
-        }
-        @keyframes floatSlow {
-          0%, 100% { transform: translate3d(0, 0, 0); }
-          50% { transform: translate3d(20px, 15px, 0); }
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(18px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes error {
-          0% { opacity: 0; transform: translateY(-5px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        .animate-float { animation: float 7s ease-in-out infinite; }
-        .animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
-        .animate-slide-up { animation: slideUp 0.7s ease-out both; }
-        .animate-error { animation: error 0.25s ease-out both; }
-      `}</style>
+        </div>
+      </section>
     </main>
-  );
-}
-
-
-/* =========================================================
-   ICONS
-========================================================= */
-
-function MailIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="m3 7 9 6 9-6" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="4" y="10" width="16" height="10" rx="2" />
-      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-    </svg>
-  );
-}
-
-function EyeIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="2.5" />
-    </svg>
-  );
-}
-
-function EyeOffIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m3 3 18 18" />
-      <path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c6.5 0 10 6 10 6a18 18 0 0 1-3.1 3.8" />
-      <path d="M6.2 6.2C3.4 8.1 2 12 2 12s3.5 6 10 6c1.3 0 2.5-.2 3.5-.6" />
-      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
-    </svg>
-  );
-}
-
-function ArrowIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="transition-transform duration-300 group-hover:translate-x-1"
-    >
-      <path d="M5 12h14" />
-      <path d="m13 6 6 6-6 6" />
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6l8-3Z" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
-  );
-}
-
-function ErrorIcon() {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8v4" />
-      <path d="M12 16h.01" />
-    </svg>
   );
 }
