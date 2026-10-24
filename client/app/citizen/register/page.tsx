@@ -1429,7 +1429,7 @@ export default function CitizenRegister() {
       setSuccess("Email verified successfully. Redirecting to login...");
 
       window.setTimeout(() => {
-        router.push("/citizen/login");
+        router.push("/");
       }, 1200);
     } catch (error) {
       console.error("Verification error:", error);
@@ -2011,7 +2011,7 @@ export default function CitizenRegister() {
 
                   type="button"
 
-                  onClick={() => router.push("/citizen/login")}
+                  onClick={() => router.push("/")}
 
                   className="ml-1.5 font-semibold text-[#0875c9] transition hover:text-[#13a66a]"
 

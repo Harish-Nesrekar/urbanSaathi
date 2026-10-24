@@ -94,52 +94,47 @@ const registerCitizen = async (req, res) => {
       });
     }
 
-    // Store new citizen passwords using Argon2id.
     const passwordHash = await hashPassword(password);
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    const [result] = await db.query(
-      `INSERT INTO users
-       (full_name, email, phone, password_hash, role, status, email_verified)
-       VALUES (?, ?, ?, ?, 'CITIZEN', 'ACTIVE', FALSE)`,
+    // Store the registration temporarily, not in users.
+    await db.query(
+      `INSERT INTO pending_citizen_registrations
+       (full_name, email, phone, password_hash, otp_hash, expires_at, attempts)
+       VALUES (?, ?, ?, ?, ?, ?, 0)
+       ON DUPLICATE KEY UPDATE
+         full_name = VALUES(full_name),
+         phone = VALUES(phone),
+         password_hash = VALUES(password_hash),
+         otp_hash = VALUES(otp_hash),
+         expires_at = VALUES(expires_at),
+         attempts = 0,
+         updated_at = CURRENT_TIMESTAMP`,
       [
         full_name.trim(),
         normalizedEmail,
         phone || null,
         passwordHash,
+        otpHash,
+        expiresAt,
       ]
     );
 
-    const userId = result.insertId;
+    try {
+      await sendVerificationEmail(normalizedEmail, otp);
+    } catch (emailError) {
+      console.error("Verification email error:", emailError.message);
+      return res.status(502).json({
+        message: "Could not send verification email. Please try again.",
+      });
+    }
 
-    // Generate a cryptographically secure six-digit OTP.
-    const otp = crypto.randomInt(100000, 1000000).toString();
-    const otpHash = await bcrypt.hash(otp, 10);
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    await db.query(
-      "DELETE FROM email_verification_otps WHERE user_id = ?",
-      [userId]
-    );
-
-    await db.query(
-      `INSERT INTO email_verification_otps
-       (user_id, otp_hash, expires_at, attempts)
-       VALUES (?, ?, ?, 0)`,
-      [userId, otpHash, expiresAt]
-    );
-
-    await sendVerificationEmail(normalizedEmail, otp);
-
-    return res.status(201).json({
-      message:
-        "Registration successful. Verification code sent to your email.",
+    return res.status(200).json({
+      message: "Verification code sent to your email.",
       requiresVerification: true,
-      user: {
-        id: userId,
-        full_name: full_name.trim(),
-        email: normalizedEmail,
-        role: "CITIZEN",
-      },
+      email: normalizedEmail,
     });
   } catch (error) {
     console.error("Registration error:", error.message);
@@ -151,6 +146,8 @@ const registerCitizen = async (req, res) => {
 };
 
 const verifyCitizenEmail = async (req, res) => {
+  let connection;
+
   try {
     const { email, otp } = req.body;
 
@@ -158,127 +155,141 @@ const verifyCitizenEmail = async (req, res) => {
       typeof email !== "string" ||
       typeof otp !== "string" ||
       !email.trim() ||
-      !otp
+      !/^\d{6}$/.test(otp)
     ) {
       return res.status(400).json({
-        message: "Email and verification code are required",
+        message: "A valid email and six-digit verification code are required",
       });
     }
 
     const normalizedEmail = normalizeEmail(email);
 
-    if (!/^\d{6}$/.test(otp)) {
-      return res.status(400).json({
-        message: "Verification code must be 6 digits",
-      });
-    }
+    connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    const [users] = await db.query(
-      `SELECT id, email_verified
-       FROM users
-       WHERE email = ? AND role = 'CITIZEN'
-       LIMIT 1`,
+    const [registrations] = await connection.query(
+      `SELECT id, full_name, email, phone, password_hash,
+              otp_hash, expires_at, attempts
+       FROM pending_citizen_registrations
+       WHERE email = ?
+       LIMIT 1
+       FOR UPDATE`,
       [normalizedEmail]
     );
 
-    if (users.length === 0) {
+    if (registrations.length === 0) {
+      await connection.rollback();
+
       return res.status(404).json({
-        message: "Citizen account not found",
+        message: "Pending registration not found. Please register again.",
       });
     }
 
-    const user = users[0];
+    const registration = registrations[0];
 
-    if (user.email_verified) {
-      return res.status(400).json({
-        message: "Email is already verified",
-      });
-    }
-
-    const [otpRecords] = await db.query(
-      `SELECT id, otp_hash, expires_at, attempts
-       FROM email_verification_otps
-       WHERE user_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [user.id]
-    );
-
-    if (otpRecords.length === 0) {
-      return res.status(400).json({
-        message:
-          "Verification code not found. Please request a new code.",
-      });
-    }
-
-    const otpRecord = otpRecords[0];
-
-    if (new Date() > new Date(otpRecord.expires_at)) {
-      await db.query(
-        "DELETE FROM email_verification_otps WHERE id = ?",
-        [otpRecord.id]
+    if (new Date() > new Date(registration.expires_at)) {
+      await connection.query(
+        `DELETE FROM pending_citizen_registrations WHERE id = ?`,
+        [registration.id]
       );
 
+      await connection.commit();
+
       return res.status(400).json({
-        message:
-          "Verification code has expired. Please request a new code.",
+        message: "Verification code has expired. Please register again.",
       });
     }
 
-    if (otpRecord.attempts >= 5) {
+    if (registration.attempts >= 5) {
+      await connection.rollback();
+
       return res.status(429).json({
-        message:
-          "Too many verification attempts. Please request a new code.",
+        message: "Too many attempts. Please request a new verification code.",
       });
     }
 
-    const otpMatch = await bcrypt.compare(
+    const otpMatches = await bcrypt.compare(
       otp,
-      otpRecord.otp_hash
+      registration.otp_hash
     );
 
-    if (!otpMatch) {
-      await db.query(
-        `UPDATE email_verification_otps
+    if (!otpMatches) {
+      await connection.query(
+        `UPDATE pending_citizen_registrations
          SET attempts = attempts + 1
-         WHERE id = ? AND attempts < 5`,
-        [otpRecord.id]
+         WHERE id = ?`,
+        [registration.id]
       );
+
+      await connection.commit();
 
       return res.status(400).json({
         message: "Invalid verification code",
       });
     }
 
-    await db.query(
-      `UPDATE users
-       SET email_verified = TRUE
-       WHERE id = ? AND role = 'CITIZEN'`,
-      [user.id]
+    // Guard against an account being created after registration started.
+    const [existingUsers] = await connection.query(
+      "SELECT id FROM users WHERE email = ? LIMIT 1",
+      [normalizedEmail]
     );
 
-    await db.query(
-      "DELETE FROM email_verification_otps WHERE id = ?",
-      [otpRecord.id]
+    if (existingUsers.length > 0) {
+      await connection.query(
+        "DELETE FROM pending_citizen_registrations WHERE id = ?",
+        [registration.id]
+      );
+
+      await connection.commit();
+
+      return res.status(409).json({
+        message: "Email is already registered. Please log in.",
+      });
+    }
+
+    // The permanent account is created only after successful OTP verification.
+    const [result] = await connection.query(
+      `INSERT INTO users
+       (full_name, email, phone, password_hash, role, status, email_verified)
+       VALUES (?, ?, ?, ?, 'CITIZEN', 'ACTIVE', TRUE)`,
+      [
+        registration.full_name,
+        registration.email,
+        registration.phone,
+        registration.password_hash,
+      ]
     );
+
+    await connection.query(
+      `DELETE FROM pending_citizen_registrations WHERE id = ?`,
+      [registration.id]
+    );
+
+    await connection.commit();
 
     return res.status(200).json({
-      message: "Email verified successfully",
+      message: "Email verified and account created successfully",
       user: {
-        id: user.id,
-        email: normalizedEmail,
+        id: result.insertId,
+        full_name: registration.full_name,
+        email: registration.email,
         role: "CITIZEN",
       },
     });
   } catch (error) {
-    console.error(
-      "Email verification error:",
-      error.message
-    );
+    if (connection) {
+      await connection.rollback().catch(() => {});
+    }
+
+    console.error("Email verification error:", error.message);
 
     return res.status(500).json({
       message: "Email verification failed",
     });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
@@ -294,54 +305,51 @@ const resendVerificationCode = async (req, res) => {
 
     const normalizedEmail = normalizeEmail(email);
 
-    const [users] = await db.query(
-      `SELECT id, email, email_verified
-       FROM users
-       WHERE email = ? AND role = 'CITIZEN'
+    const [registrations] = await db.query(
+      `SELECT id, email
+       FROM pending_citizen_registrations
+       WHERE email = ?
        LIMIT 1`,
       [normalizedEmail]
     );
 
-    if (users.length === 0) {
+    if (registrations.length === 0) {
       return res.status(404).json({
-        message: "Citizen account not found",
+        message: "Pending registration not found. Please register again.",
       });
     }
 
-    const user = users[0];
-
-    if (user.email_verified) {
-      return res.status(400).json({
-        message: "Email is already verified",
-      });
-    }
+    const registration = registrations[0];
 
     const otp = crypto.randomInt(100000, 1000000).toString();
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await db.query(
-      "DELETE FROM email_verification_otps WHERE user_id = ?",
-      [user.id]
+      `UPDATE pending_citizen_registrations
+       SET otp_hash = ?,
+           expires_at = ?,
+           attempts = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [otpHash, expiresAt, registration.id]
     );
 
-    await db.query(
-      `INSERT INTO email_verification_otps
-       (user_id, otp_hash, expires_at, attempts)
-       VALUES (?, ?, ?, 0)`,
-      [user.id, otpHash, expiresAt]
-    );
+    try {
+      await sendVerificationEmail(normalizedEmail, otp);
+    } catch (emailError) {
+      console.error("Resend verification email error:", emailError.message);
 
-    await sendVerificationEmail(normalizedEmail, otp);
+      return res.status(502).json({
+        message: "Could not send verification email. Please try again.",
+      });
+    }
 
     return res.status(200).json({
       message: "A new verification code has been sent to your email",
     });
   } catch (error) {
-    console.error(
-      "Resend verification error:",
-      error.message
-    );
+    console.error("Resend verification error:", error.message);
 
     return res.status(500).json({
       message: "Failed to resend verification code",
