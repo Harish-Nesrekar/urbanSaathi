@@ -1,4 +1,3 @@
-
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -51,6 +50,7 @@ const upgradePasswordHashIfNeeded = async (
   );
 };
 
+// Register a citizen and send an email verification code.
 const registerCitizen = async (req, res) => {
   try {
     const { full_name, email, phone, password } = req.body;
@@ -99,7 +99,7 @@ const registerCitizen = async (req, res) => {
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Store the registration temporarily, not in users.
+    // Store the registration temporarily until OTP verification.
     await db.query(
       `INSERT INTO pending_citizen_registrations
        (full_name, email, phone, password_hash, otp_hash, expires_at, attempts)
@@ -125,9 +125,14 @@ const registerCitizen = async (req, res) => {
     try {
       await sendVerificationEmail(normalizedEmail, otp);
     } catch (emailError) {
-      console.error("Verification email error:", emailError.message);
+      console.error(
+        "Verification email error:",
+        emailError.message
+      );
+
       return res.status(502).json({
-        message: "Could not send verification email. Please try again.",
+        message:
+          "Could not send verification email. Please try again.",
       });
     }
 
@@ -145,6 +150,7 @@ const registerCitizen = async (req, res) => {
   }
 };
 
+// Verify the OTP and create both the user and citizen profile.
 const verifyCitizenEmail = async (req, res) => {
   let connection;
 
@@ -158,7 +164,8 @@ const verifyCitizenEmail = async (req, res) => {
       !/^\d{6}$/.test(otp)
     ) {
       return res.status(400).json({
-        message: "A valid email and six-digit verification code are required",
+        message:
+          "A valid email and six-digit verification code are required",
       });
     }
 
@@ -181,7 +188,8 @@ const verifyCitizenEmail = async (req, res) => {
       await connection.rollback();
 
       return res.status(404).json({
-        message: "Pending registration not found. Please register again.",
+        message:
+          "Pending registration not found. Please register again.",
       });
     }
 
@@ -189,14 +197,16 @@ const verifyCitizenEmail = async (req, res) => {
 
     if (new Date() > new Date(registration.expires_at)) {
       await connection.query(
-        `DELETE FROM pending_citizen_registrations WHERE id = ?`,
+        `DELETE FROM pending_citizen_registrations
+         WHERE id = ?`,
         [registration.id]
       );
 
       await connection.commit();
 
       return res.status(400).json({
-        message: "Verification code has expired. Please register again.",
+        message:
+          "Verification code has expired. Please register again.",
       });
     }
 
@@ -204,7 +214,8 @@ const verifyCitizenEmail = async (req, res) => {
       await connection.rollback();
 
       return res.status(429).json({
-        message: "Too many attempts. Please request a new verification code.",
+        message:
+          "Too many attempts. Please request a new verification code.",
       });
     }
 
@@ -228,7 +239,7 @@ const verifyCitizenEmail = async (req, res) => {
       });
     }
 
-    // Guard against an account being created after registration started.
+    // Prevent duplicate accounts if one was created in the meantime.
     const [existingUsers] = await connection.query(
       "SELECT id FROM users WHERE email = ? LIMIT 1",
       [normalizedEmail]
@@ -236,7 +247,8 @@ const verifyCitizenEmail = async (req, res) => {
 
     if (existingUsers.length > 0) {
       await connection.query(
-        "DELETE FROM pending_citizen_registrations WHERE id = ?",
+        `DELETE FROM pending_citizen_registrations
+         WHERE id = ?`,
         [registration.id]
       );
 
@@ -247,7 +259,7 @@ const verifyCitizenEmail = async (req, res) => {
       });
     }
 
-    // The permanent account is created only after successful OTP verification.
+    // Step 1: Create the permanent user after successful OTP verification.
     const [result] = await connection.query(
       `INSERT INTO users
        (full_name, email, phone, password_hash, role, status, email_verified)
@@ -260,11 +272,22 @@ const verifyCitizenEmail = async (req, res) => {
       ]
     );
 
+    // Step 2: Automatically create the linked citizen profile.
+    // This prevents "Citizen profile not found" for new registrations.
     await connection.query(
-      `DELETE FROM pending_citizen_registrations WHERE id = ?`,
+      `INSERT INTO citizens (user_id)
+       VALUES (?)`,
+      [result.insertId]
+    );
+
+    // Step 3: Remove the completed pending registration.
+    await connection.query(
+      `DELETE FROM pending_citizen_registrations
+       WHERE id = ?`,
       [registration.id]
     );
 
+    // Step 4: Commit all changes together.
     await connection.commit();
 
     return res.status(200).json({
@@ -281,7 +304,10 @@ const verifyCitizenEmail = async (req, res) => {
       await connection.rollback().catch(() => {});
     }
 
-    console.error("Email verification error:", error.message);
+    console.error(
+      "Email verification error:",
+      error.message
+    );
 
     return res.status(500).json({
       message: "Email verification failed",
@@ -293,6 +319,7 @@ const verifyCitizenEmail = async (req, res) => {
   }
 };
 
+// Resend the email verification code.
 const resendVerificationCode = async (req, res) => {
   try {
     const { email } = req.body;
@@ -315,7 +342,8 @@ const resendVerificationCode = async (req, res) => {
 
     if (registrations.length === 0) {
       return res.status(404).json({
-        message: "Pending registration not found. Please register again.",
+        message:
+          "Pending registration not found. Please register again.",
       });
     }
 
@@ -338,10 +366,14 @@ const resendVerificationCode = async (req, res) => {
     try {
       await sendVerificationEmail(normalizedEmail, otp);
     } catch (emailError) {
-      console.error("Resend verification email error:", emailError.message);
+      console.error(
+        "Resend verification email error:",
+        emailError.message
+      );
 
       return res.status(502).json({
-        message: "Could not send verification email. Please try again.",
+        message:
+          "Could not send verification email. Please try again.",
       });
     }
 
@@ -349,7 +381,10 @@ const resendVerificationCode = async (req, res) => {
       message: "A new verification code has been sent to your email",
     });
   } catch (error) {
-    console.error("Resend verification error:", error.message);
+    console.error(
+      "Resend verification error:",
+      error.message
+    );
 
     return res.status(500).json({
       message: "Failed to resend verification code",
@@ -357,6 +392,7 @@ const resendVerificationCode = async (req, res) => {
   }
 };
 
+// Citizen login.
 const loginCitizen = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -459,6 +495,7 @@ const loginCitizen = async (req, res) => {
   }
 };
 
+// Admin login.
 const loginAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -567,7 +604,7 @@ const loginAdmin = async (req, res) => {
   }
 };
 
-
+// Employee login.
 const loginEmployee = async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
@@ -626,15 +663,16 @@ const loginEmployee = async (req, res) => {
       !user.department_active
     ) {
       return res.status(403).json({
-        message: "Your employee account or department is inactive",
+        message:
+          "Your employee account or department is inactive",
       });
     }
 
-   await upgradePasswordHashIfNeeded(
-  user,
-  password,
-  passwordCheck
-);
+    await upgradePasswordHashIfNeeded(
+      user,
+      password,
+      passwordCheck
+    );
 
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is not configured");
@@ -654,7 +692,9 @@ const loginEmployee = async (req, res) => {
     );
 
     await db.query(
-      "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
+      `UPDATE users
+       SET last_login = CURRENT_TIMESTAMP
+       WHERE id = ?`,
       [user.id]
     );
 
@@ -682,7 +722,6 @@ const loginEmployee = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   registerCitizen,

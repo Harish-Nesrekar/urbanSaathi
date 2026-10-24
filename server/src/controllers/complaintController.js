@@ -1,19 +1,49 @@
-
 const db = require("../config/db");
+const crypto = require("crypto");
 
-// Get active complaint categories.
+// Get active complaint categories with their mapped active departments.
 // GET /api/complaints/categories
 exports.getCategories = async (req, res) => {
   try {
-    const [categories] = await db.query(
-      `SELECT id, name, description
-       FROM complaint_categories
-       WHERE is_active = TRUE
-       ORDER BY name ASC`
+    const [rows] = await db.query(
+      `SELECT
+         cc.id,
+         cc.name,
+         cc.description,
+         d.id AS department_id,
+         d.name AS department_name
+       FROM complaint_categories cc
+       LEFT JOIN complaint_category_departments ccd
+         ON ccd.category_id = cc.id
+       LEFT JOIN departments d
+         ON d.id = ccd.department_id
+         AND d.is_active = TRUE
+       WHERE cc.is_active = TRUE
+       ORDER BY cc.name ASC, d.name ASC`
     );
 
+    const categoryMap = new Map();
+
+    for (const row of rows) {
+      if (!categoryMap.has(row.id)) {
+        categoryMap.set(row.id, {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          departments: [],
+        });
+      }
+
+      if (row.department_id !== null) {
+        categoryMap.get(row.id).departments.push({
+          id: row.department_id,
+          name: row.department_name,
+        });
+      }
+    }
+
     return res.status(200).json({
-      categories,
+      categories: Array.from(categoryMap.values()),
     });
   } catch (error) {
     console.error("Get complaint categories error:", error.message);
@@ -46,9 +76,9 @@ exports.getMyComplaints = async (req, res) => {
 
     const [complaints] = await db.query(
       `SELECT
-    c.id,
-    c.department_id,
-    c.complaint_number,
+         c.id,
+         c.department_id,
+         c.complaint_number,
          c.title,
          c.description,
          c.priority,
@@ -80,8 +110,7 @@ exports.getMyComplaints = async (req, res) => {
   }
 };
 
-
- // Get details, attachments, and status history for one complaint.
+// Get details, attachments, and status history for one complaint.
 // GET /api/complaints/:complaintId
 exports.getComplaintDetails = async (req, res) => {
   try {
@@ -145,7 +174,6 @@ exports.getComplaintDetails = async (req, res) => {
 
     const complaint = complaints[0];
 
-    // Do not expose the internal ownership field in the response.
     delete complaint.citizen_user_id;
 
     const [attachments] = await db.query(
@@ -192,9 +220,6 @@ exports.getComplaintDetails = async (req, res) => {
   }
 };
 
-
-// Get all complaints for administrators.
-// GET /api/complaints
 // Get all complaints for administrators.
 // GET /api/complaints
 exports.getAllComplaints = async (req, res) => {
@@ -244,26 +269,30 @@ exports.getAllComplaints = async (req, res) => {
     });
   }
 };
-const crypto = require("crypto");
 
 // Create a complaint for the authenticated citizen.
 // POST /api/complaints
 exports.createComplaint = async (req, res) => {
-  const connection = await db.getConnection();
+  let connection;
+  let transactionStarted = false;
 
   try {
+    connection = await db.getConnection();
+
     const userId = req.user.id;
+
     const {
       title,
       description,
       categoryId,
+      departmentId,
       priority = "MEDIUM",
       address = null,
       latitude = null,
       longitude = null,
-    } = req.body;
+    } = req.body || {};
 
-    // Validate required fields.
+    // Validate title.
     if (
       typeof title !== "string" ||
       !title.trim() ||
@@ -274,27 +303,37 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
+    // Validate description.
     if (
       typeof description !== "string" ||
       !description.trim() ||
       description.trim().length > 10000
     ) {
       return res.status(400).json({
-        message: "Description is required and must not exceed 10000 characters",
+        message:
+          "Description is required and must not exceed 10000 characters",
       });
     }
 
+    // Validate category ID.
     const parsedCategoryId = Number(categoryId);
 
-    if (
-      !Number.isInteger(parsedCategoryId) ||
-      parsedCategoryId <= 0
-    ) {
+    if (!Number.isInteger(parsedCategoryId) || parsedCategoryId <= 0) {
       return res.status(400).json({
         message: "A valid complaint category is required",
       });
     }
 
+    // Validate department ID.
+    const parsedDepartmentId = Number(departmentId);
+
+    if (!Number.isInteger(parsedDepartmentId) || parsedDepartmentId <= 0) {
+      return res.status(400).json({
+        message: "A valid department is required",
+      });
+    }
+
+    // Validate priority.
     const allowedPriorities = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 
     if (
@@ -306,6 +345,7 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
+    // Validate address.
     if (
       address !== null &&
       (typeof address !== "string" || address.trim().length > 500)
@@ -315,6 +355,7 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
+    // Validate coordinates.
     const parsedLatitude =
       latitude === null || latitude === "" ? null : Number(latitude);
 
@@ -336,15 +377,15 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
-    if (
-      (parsedLatitude === null) !== (parsedLongitude === null)
-    ) {
+    if ((parsedLatitude === null) !== (parsedLongitude === null)) {
       return res.status(400).json({
         message: "Provide both latitude and longitude, or neither",
       });
     }
 
+    // Start transaction.
     await connection.beginTransaction();
+    transactionStarted = true;
 
     // Resolve the authenticated user to their citizen profile.
     const [citizens] = await connection.query(
@@ -357,39 +398,39 @@ exports.createComplaint = async (req, res) => {
 
     if (citizens.length === 0) {
       await connection.rollback();
+      transactionStarted = false;
 
       return res.status(400).json({
         message: "Citizen profile not found. Please contact support.",
       });
     }
 
-   // Validate the category and retrieve its mapped department.
-const [categories] = await connection.query(
-  `SELECT
-     cc.id,
-     ccd.department_id
-   FROM complaint_categories cc
-   INNER JOIN complaint_category_departments ccd
-     ON ccd.category_id = cc.id
-   INNER JOIN departments d
-     ON d.id = ccd.department_id
-   WHERE cc.id = ?
-     AND cc.is_active = TRUE
-     AND d.is_active = TRUE
-   LIMIT 1`,
-  [parsedCategoryId]
-);
+    // Verify the selected department belongs to the selected active category.
+    const [categoryDepartmentRows] = await connection.query(
+      `SELECT cc.id
+       FROM complaint_categories cc
+       INNER JOIN complaint_category_departments ccd
+         ON ccd.category_id = cc.id
+       INNER JOIN departments d
+         ON d.id = ccd.department_id
+       WHERE cc.id = ?
+         AND ccd.department_id = ?
+         AND cc.is_active = TRUE
+         AND d.is_active = TRUE
+       LIMIT 1`,
+      [parsedCategoryId, parsedDepartmentId]
+    );
 
-    if (categories.length === 0) {
+    if (categoryDepartmentRows.length === 0) {
       await connection.rollback();
+      transactionStarted = false;
 
       return res.status(400).json({
-        message: "Selected complaint category is unavailable",
+        message: "Selected department is not available for this category",
       });
     }
-    const departmentId = categories[0].department_id;
 
-    // Generate a unique, non-sequential public reference.
+    // Generate a unique public reference.
     const complaintNumber = `US-${Date.now()}-${crypto
       .randomBytes(4)
       .toString("hex")
@@ -397,34 +438,37 @@ const [categories] = await connection.query(
 
     const normalizedPriority = priority.toUpperCase();
 
+    // Save the complaint with the citizen's selected department.
     const [result] = await connection.query(
-  `INSERT INTO complaints (
-     complaint_number,
-     citizen_id,
-     category_id,
-     department_id,
-     title,
-     description,
-     priority,
-     status,
-     address,
-     latitude,
-     longitude
-   )
-   VALUES (?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', ?, ?, ?)`,
-  [
-    complaintNumber,
-    citizens[0].id,
-    parsedCategoryId,
-    departmentId,
-    title.trim(),
-    description.trim(),
-    normalizedPriority,
-    address?.trim() || null,
-    parsedLatitude,
-    parsedLongitude,
-  ]
-);
+      `INSERT INTO complaints (
+         complaint_number,
+         citizen_id,
+         category_id,
+         department_id,
+         title,
+         description,
+         priority,
+         status,
+         address,
+         latitude,
+         longitude
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', ?, ?, ?)`,
+      [
+        complaintNumber,
+        citizens[0].id,
+        parsedCategoryId,
+        parsedDepartmentId,
+        title.trim(),
+        description.trim(),
+        normalizedPriority,
+        address?.trim() || null,
+        parsedLatitude,
+        parsedLongitude,
+      ]
+    );
+
+    // Record the initial complaint status.
     await connection.query(
       `INSERT INTO complaint_status_history (
          complaint_id,
@@ -438,6 +482,7 @@ const [categories] = await connection.query(
     );
 
     await connection.commit();
+    transactionStarted = false;
 
     return res.status(201).json({
       message: "Complaint submitted successfully",
@@ -446,12 +491,22 @@ const [categories] = await connection.query(
         complaintNumber,
         title: title.trim(),
         categoryId: parsedCategoryId,
+        departmentId: parsedDepartmentId,
         priority: normalizedPriority,
         status: "SUBMITTED",
       },
     });
   } catch (error) {
-    await connection.rollback();
+    if (connection && transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error(
+          "Complaint transaction rollback error:",
+          rollbackError.message
+        );
+      }
+    }
 
     console.error("Create complaint error:", error.message);
 
@@ -459,7 +514,9 @@ const [categories] = await connection.query(
       message: "Unable to submit complaint",
     });
   } finally {
-    connection.release();
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
@@ -486,8 +543,13 @@ exports.updateComplaintStatus = async (req, res) => {
     return res.status(400).json({ message: "Invalid complaint status." });
   }
 
-  if (note !== undefined && (typeof note !== "string" || note.length > 1000)) {
-    return res.status(400).json({ message: "The note must be under 1000 characters." });
+  if (
+    note !== undefined &&
+    (typeof note !== "string" || note.length > 1000)
+  ) {
+    return res.status(400).json({
+      message: "The note must be under 1000 characters.",
+    });
   }
 
   let connection;
@@ -506,6 +568,7 @@ exports.updateComplaintStatus = async (req, res) => {
     if (!rows.length) {
       await connection.rollback();
       transactionStarted = false;
+
       return res.status(404).json({ message: "Complaint not found." });
     }
 
@@ -514,6 +577,7 @@ exports.updateComplaintStatus = async (req, res) => {
     if (previousStatus === status) {
       await connection.commit();
       transactionStarted = false;
+
       return res.status(200).json({
         message: "Complaint already has this status.",
         complaint: { id: complaintId, status },
@@ -521,7 +585,13 @@ exports.updateComplaintStatus = async (req, res) => {
     }
 
     await connection.query(
-      "UPDATE complaints SET status = ?, resolved_at = CASE WHEN ? = 'RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id = ?",
+      `UPDATE complaints
+       SET status = ?,
+           resolved_at = CASE
+             WHEN ? = 'RESOLVED' THEN CURRENT_TIMESTAMP
+             ELSE NULL
+           END
+       WHERE id = ?`,
       [status, status, complaintId]
     );
 
@@ -534,9 +604,7 @@ exports.updateComplaintStatus = async (req, res) => {
         previousStatus,
         status,
         req.user.id,
-        typeof note === "string" && note.trim()
-          ? note.trim()
-          : null,
+        typeof note === "string" && note.trim() ? note.trim() : null,
       ]
     );
 
@@ -561,13 +629,15 @@ exports.updateComplaintStatus = async (req, res) => {
     }
 
     console.error("Update complaint status error:", error);
-    return res.status(500).json({ message: "Unable to update complaint status." });
+
+    return res.status(500).json({
+      message: "Unable to update complaint status.",
+    });
   } finally {
     if (connection) connection.release();
   }
 };
 
-// List complaints assigned to the logged-in employee's department.
 // List complaints assigned to the logged-in employee's department.
 exports.getDepartmentComplaints = async (req, res) => {
   try {
@@ -645,16 +715,15 @@ exports.getDepartmentComplaints = async (req, res) => {
       total: complaints.length,
     });
   } catch (error) {
-    console.error(
-      "Get department complaints error:",
-      error.message
-    );
+    console.error("Get department complaints error:", error.message);
 
     return res.status(500).json({
       message: "Unable to retrieve department complaints.",
     });
   }
-};// Update complaint status by an employee assigned to its department.
+};
+
+// Update complaint status by an employee assigned to its department.
 exports.updateDepartmentComplaintStatus = async (req, res) => {
   const complaintId = Number(req.params.complaintId);
   const { status, note } = req.body || {};
@@ -739,7 +808,7 @@ exports.updateDepartmentComplaintStatus = async (req, res) => {
 
     const complaint = complaintRows[0];
 
-    // An employee must never update another department's complaint.
+    // Employees cannot update complaints belonging to another department.
     if (Number(complaint.department_id) !== Number(departmentId)) {
       await connection.rollback();
       transactionStarted = false;
@@ -781,9 +850,7 @@ exports.updateDepartmentComplaintStatus = async (req, res) => {
         previousStatus,
         status,
         req.user.id,
-        typeof note === "string" && note.trim()
-          ? note.trim()
-          : null,
+        typeof note === "string" && note.trim() ? note.trim() : null,
       ]
     );
 

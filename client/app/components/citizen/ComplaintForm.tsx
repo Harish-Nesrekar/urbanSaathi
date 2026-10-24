@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -17,10 +18,16 @@ const LocationPicker = dynamic(
   }
 );
 
+type Department = {
+  id: number;
+  name: string;
+};
+
 type Category = {
   id: number;
   name: string;
   description?: string | null;
+  departments: Department[];
 };
 
 const inputStyle =
@@ -35,6 +42,7 @@ export default function ComplaintForm({
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -44,15 +52,43 @@ export default function ComplaintForm({
   const [files, setFiles] = useState<File[]>([]);
   const [mapOpen, setMapOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const selectedCategory = categories.find(
+    (category) => String(category.id) === categoryId
+  );
+
+  const availableDepartments = selectedCategory?.departments ?? [];
+
   useEffect(() => {
+    let cancelled = false;
+
     citizenFetch<{ categories: Category[] }>("/api/complaints/categories")
-      .then((d) => setCategories(d.categories || []))
-      .catch((e) => setError(e.message));
+      .then((data) => {
+        if (!cancelled) {
+          setCategories(data.categories || []);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Unable to load complaint categories."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingCategories(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -65,6 +101,20 @@ export default function ComplaintForm({
       return;
     }
 
+    if (!departmentId) {
+      setError("Please select a department.");
+      return;
+    }
+
+    if (
+      !availableDepartments.some(
+        (department) => String(department.id) === departmentId
+      )
+    ) {
+      setError("Please select a valid department for this category.");
+      return;
+    }
+
     if (files.length > 3) {
       setError("You can attach up to 3 images only.");
       return;
@@ -74,7 +124,11 @@ export default function ComplaintForm({
 
     try {
       const data = await citizenFetch<{
-        complaint: { id: number; complaintNumber?: string };
+        complaint: {
+          id: number;
+          complaintNumber?: string;
+          departmentId?: number;
+        };
       }>("/api/complaints", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,6 +136,7 @@ export default function ComplaintForm({
           title: title.trim(),
           description: description.trim(),
           categoryId: Number(categoryId),
+          departmentId: Number(departmentId),
           priority,
           address: address.trim() || null,
           latitude,
@@ -89,9 +144,13 @@ export default function ComplaintForm({
         }),
       });
 
-      if (files.length && data.complaint?.id) {
+      if (files.length > 0 && data.complaint?.id) {
         const form = new FormData();
-        files.forEach((f) => form.append("images", f));
+
+        files.forEach((file) => {
+          form.append("images", file);
+        });
+
         await citizenFetch(
           `/api/complaints/${data.complaint.id}/attachments`,
           {
@@ -102,19 +161,29 @@ export default function ComplaintForm({
       }
 
       setMessage(
-        `Complaint ${data.complaint?.complaintNumber || ""} submitted successfully.`
+        `Complaint ${
+          data.complaint?.complaintNumber || ""
+        } submitted successfully.`
       );
+
       setTitle("");
       setDescription("");
       setCategoryId("");
+      setDepartmentId("");
       setPriority("MEDIUM");
       setAddress("");
       setLatitude(null);
       setLongitude(null);
       setFiles([]);
+      setMapOpen(false);
 
-      if (fileRef.current) fileRef.current.value = "";
-      if (onSubmitted) onSubmitted();
+      if (fileRef.current) {
+        fileRef.current.value = "";
+      }
+
+      if (onSubmitted) {
+        onSubmitted();
+      }
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Unable to submit your complaint."
@@ -125,8 +194,11 @@ export default function ComplaintForm({
   }
 
   const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    if (fileRef.current) fileRef.current.value = "";
+    setFiles((previous) => previous.filter((_, i) => i !== index));
+
+    if (fileRef.current) {
+      fileRef.current.value = "";
+    }
   };
 
   return (
@@ -135,6 +207,7 @@ export default function ComplaintForm({
         <h2 className="text-xl font-black text-[#233d26]">
           Complaint Details
         </h2>
+
         <p className="mt-1 text-sm text-[#667d69]">
           Describe the civic problem clearly so municipal engineers can inspect it.
         </p>
@@ -165,20 +238,60 @@ export default function ComplaintForm({
       )}
 
       <form onSubmit={submit} className="mt-6 space-y-6">
-        {/* Category & Priority Selectors */}
+        {/* Category, Department & Priority Selectors */}
         <div className="grid gap-5 sm:grid-cols-2">
           <label className={labelStyle}>
             Category <span className="text-red-500">*</span>
+
             <select
               className={inputStyle}
               value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
+              onChange={(e) => {
+                setCategoryId(e.target.value);
+                setDepartmentId("");
+                setError("");
+              }}
               required
+              disabled={loadingCategories}
             >
-              <option value="">Select issue category</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+              <option value="">
+                {loadingCategories
+                  ? "Loading categories…"
+                  : "Select issue category"}
+              </option>
+
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className={labelStyle}>
+            Department <span className="text-red-500">*</span>
+
+            <select
+              className={inputStyle}
+              value={departmentId}
+              onChange={(e) => {
+                setDepartmentId(e.target.value);
+                setError("");
+              }}
+              required
+              disabled={!categoryId || availableDepartments.length === 0}
+            >
+              <option value="">
+                {!categoryId
+                  ? "Select category first"
+                  : availableDepartments.length === 0
+                    ? "No departments available"
+                    : "Select department"}
+              </option>
+
+              {availableDepartments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
                 </option>
               ))}
             </select>
@@ -186,6 +299,7 @@ export default function ComplaintForm({
 
           <label className={labelStyle}>
             Priority <span className="text-red-500">*</span>
+
             <select
               className={inputStyle}
               value={priority}
@@ -202,6 +316,7 @@ export default function ComplaintForm({
         {/* Title */}
         <label className={labelStyle}>
           Complaint title <span className="text-red-500">*</span>
+
           <input
             className={inputStyle}
             value={title}
@@ -215,6 +330,7 @@ export default function ComplaintForm({
         {/* Description */}
         <label className={labelStyle}>
           Detailed description <span className="text-red-500">*</span>
+
           <textarea
             className={`${inputStyle} min-h-32 resize-y`}
             value={description}
@@ -223,6 +339,7 @@ export default function ComplaintForm({
             required
             placeholder="Provide context, street markers, or time the issue occurred…"
           />
+
           <span className="mt-1 block text-right text-xs text-[#8a9d8d]">
             {description.length}/10,000 characters
           </span>
@@ -231,6 +348,7 @@ export default function ComplaintForm({
         {/* Address */}
         <label className={labelStyle}>
           Address or Landmark
+
           <input
             className={inputStyle}
             value={address}
@@ -250,6 +368,7 @@ export default function ComplaintForm({
                   (Optional)
                 </span>
               </p>
+
               <p className="mt-0.5 text-xs text-[#687f6b]">
                 Help the field team find the exact GPS coordinates.
               </p>
@@ -258,7 +377,7 @@ export default function ComplaintForm({
             <button
               type="button"
               className="rounded-xl border border-[#d2e2ce] bg-white px-4 py-2 text-xs font-bold text-[#355b38] shadow-2xs hover:bg-[#edf5ea]"
-              onClick={() => setMapOpen((v) => !v)}
+              onClick={() => setMapOpen((previous) => !previous)}
             >
               {mapOpen ? "✕ Close Map" : "🗺️ Open Map"}
             </button>
@@ -267,9 +386,11 @@ export default function ComplaintForm({
           {latitude !== null && longitude !== null && (
             <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-[#d1e5cd] bg-white px-3 py-1.5 text-xs text-[#326037]">
               <span>📍 GPS Pinned:</span>
+
               <span className="font-mono font-bold">
                 {latitude.toFixed(5)}, {longitude.toFixed(5)}
               </span>
+
               <button
                 type="button"
                 className="ml-2 font-bold text-red-600 hover:underline"
@@ -307,6 +428,7 @@ export default function ComplaintForm({
             <span className="font-normal text-xs text-[#718574]">
               (Up to 3 images, 5 MB max each)
             </span>
+
             <input
               ref={fileRef}
               className={`${inputStyle} file:mr-3 file:rounded-lg file:border-0 file:bg-[#e4efe0] file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-[#315f36] file:transition hover:file:bg-[#d6e7d1]`}
@@ -315,13 +437,15 @@ export default function ComplaintForm({
               multiple
               onChange={(e) => {
                 const picked = Array.from(e.target.files || []);
+
                 if (
                   picked.length > 3 ||
                   picked.some(
-                    (f) =>
+                    (file) =>
                       !["image/jpeg", "image/png", "image/webp"].includes(
-                        f.type
-                      ) || f.size > 5 * 1024 * 1024
+                        file.type
+                      ) ||
+                      file.size > 5 * 1024 * 1024
                   )
                 ) {
                   setError(
@@ -340,16 +464,20 @@ export default function ComplaintForm({
           {/* Selected File Badges */}
           {files.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
-              {files.map((f, idx) => (
+              {files.map((file, index) => (
                 <span
-                  key={idx}
+                  key={`${file.name}-${index}`}
                   className="inline-flex items-center gap-2 rounded-xl border border-[#d6e5d3] bg-[#f6faf5] px-3 py-1.5 text-xs text-[#2b4b2e]"
                 >
-                  <span className="truncate max-w-[150px]">{f.name}</span>
+                  <span className="max-w-[150px] truncate">
+                    {file.name}
+                  </span>
+
                   <button
                     type="button"
-                    onClick={() => removeFile(idx)}
+                    onClick={() => removeFile(index)}
                     className="font-bold text-[#863e37] hover:text-red-700"
+                    aria-label={`Remove ${file.name}`}
                   >
                     ✕
                   </button>
@@ -362,7 +490,11 @@ export default function ComplaintForm({
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={busy || categories.length === 0}
+          disabled={
+            busy ||
+            loadingCategories ||
+            categories.length === 0
+          }
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#3f7a44] px-6 py-3.5 text-sm font-bold text-white shadow-xs transition hover:bg-[#326436] disabled:opacity-50 sm:w-auto"
         >
           {busy ? (

@@ -1,7 +1,11 @@
 
+require("dotenv").config({
+  path: require("path").join(__dirname, ".env"),
+});
+
 const { hashPassword } = require("./src/services/passwordService");
 const db = require("./src/config/db");
-require("dotenv").config();
+
 
 const createAdmin = async () => {
   try {
