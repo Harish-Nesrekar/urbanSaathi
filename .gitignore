@@ -22,3 +22,6 @@ server/uploads/*
 
 # Local test/download artifacts
 /curl
+
+# Local Google OAuth credentials
+server/client_secret_*.json
