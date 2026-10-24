@@ -1,95 +1,99 @@
 
-const { Resend } = require("resend");
 require("dotenv").config();
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const { google } = require("googleapis");
 
-const sendVerificationEmail = async (email, otp) => {
-  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
-    throw new Error("Missing Resend email configuration");
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET
+);
+
+oauth2Client.setCredentials({
+  refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+});
+
+const gmail = google.gmail({
+  version: "v1",
+  auth: oauth2Client,
+});
+
+function encodeEmail(message) {
+  return Buffer.from(message)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function sendVerificationEmail(email, otp) {
+  const sender = process.env.GOOGLE_EMAIL;
+
+  if (
+    !sender ||
+    !process.env.GOOGLE_CLIENT_ID ||
+    !process.env.GOOGLE_CLIENT_SECRET ||
+    !process.env.GOOGLE_REFRESH_TOKEN
+  ) {
+    throw new Error("Missing Gmail API environment variables");
   }
 
-  const mailOptions = {
-    from: process.env.EMAIL_FROM,
-    to: email,
-    subject: "UrbanSathi Email Verification Code",
-    text: `Your UrbanSathi verification code is ${otp}. This code will expire in 10 minutes.`,
-    html: `
-      <div style="
-        margin: 0;
-        padding: 40px 20px;
-        background-color: #f6f9fc;
-        font-family: Arial, sans-serif;
-      ">
-        <div style="
-          max-width: 520px;
-          margin: 0 auto;
-          background: white;
-          border-radius: 20px;
-          padding: 40px;
-          box-shadow: 0 15px 40px rgba(10, 40, 80, 0.10);
-        ">
-          <h1 style="margin: 0 0 10px; color: #061d3b; font-size: 28px;">
-            UrbanSathi
-          </h1>
+  const subject = "UrbanSathi Email Verification Code";
+  const text = `Your UrbanSathi verification code is ${otp}. This code expires in 10 minutes.`;
 
-          <p style="color: #64748b; font-size: 15px; line-height: 1.6;">
-            Welcome to UrbanSathi. Please use the verification code below
-            to verify your email address.
-          </p>
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
+      <h2 style="color:#15803d">UrbanSathi</h2>
+      <p>Use this code to verify your email address:</p>
+      <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:16px 0">${otp}</div>
+      <p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>
+    </div>
+  `;
 
-          <div style="
-            margin: 30px 0;
-            padding: 20px;
-            text-align: center;
-            background-color: #f1f7fc;
-            border-radius: 14px;
-          ">
-            <span style="
-              color: #0875c9;
-              font-size: 36px;
-              font-weight: 700;
-              letter-spacing: 8px;
-            ">${otp}</span>
-          </div>
+  const boundary = "urbanSathiEmailBoundary";
 
-          <p style="color: #64748b; font-size: 14px;">
-            This code expires in <strong>10 minutes</strong>.
-          </p>
+  const message = [
+    `From: "UrbanSathi" <${sender}>`,
+    `To: ${email}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "",
+    text,
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    html,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
 
-          <p style="margin-top: 30px; color: #94a3b8; font-size: 12px;">
-            If you did not create an UrbanSathi account, you can safely
-            ignore this email.
-          </p>
-        </div>
-      </div>
-    `,
-  };
+  try {
+    const response = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw: encodeEmail(message) },
+    });
 
-  const { data, error } = await resend.emails.send(mailOptions);
-
-  if (error) {
-    console.error("Resend verification email failed:", {
+    console.log("Gmail accepted verification email:", response.data.id);
+    return response.data;
+  } catch (error) {
+    console.error("Gmail API email error:", {
       message: error.message,
-      statusCode: error.statusCode,
+      status: error.response?.status,
+      details: error.response?.data?.error?.message,
     });
 
     throw new Error("Could not send verification email");
   }
+}
 
-  console.log("Verification email accepted by Resend:", data?.id);
-  return data;
-};
-
-// Retained for compatibility with existing imports.
-// This checks configuration, not actual email delivery.
-const verifyEmailConnection = async () => {
-  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
-    throw new Error("Missing Resend email configuration");
-  }
-
-  console.log("Resend email configuration is present");
-};
+async function verifyEmailConnection() {
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  console.log("Gmail API connected:", profile.data.emailAddress);
+  return profile.data;
+}
 
 module.exports = {
   sendVerificationEmail,
