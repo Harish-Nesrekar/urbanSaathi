@@ -718,32 +718,52 @@ function ScrollableCityCanvas({
    PAGE COMPONENT: UNIFIED LOGIN WITH SCROLL JOURNEY
 ========================================================= */
 
+
 export default function UnifiedLoginPage() {
   const router = useRouter();
 
   type LoginRole = "CITIZEN" | "EMPLOYEE" | "ADMIN";
+  type RecoveryStep = "email" | "otp" | "password" | "done";
+
   const [role, setRole] = useState<LoginRole>("CITIZEN");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Citizen-only inline password recovery.
+  const [forgotMode, setForgotMode] = useState(false);
+  const [recoveryStep, setRecoveryStep] =
+    useState<RecoveryStep>("email");
+  const [recoveryOtp, setRecoveryOtp] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] =
+    useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryMessage, setRecoveryMessage] = useState("");
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const roleDetails = {
     CITIZEN: {
       title: "Citizen Portal",
-      subtitle: "Report civic issues and track your complaints in real time.",
+      subtitle:
+        "Report civic issues and track your complaints in real time.",
       emailLabel: "Email address",
       placeholder: "you@gmail.com",
       button: "Sign in as Citizen",
       endpoint: "/api/auth/login",
       destination: "/citizen/dashboard",
-      helper: "Access your account to report and track civic complaints.",
+      helper:
+        "Access your account to report and track civic complaints.",
     },
     EMPLOYEE: {
       title: "Employee Portal",
-      subtitle: "Manage and resolve complaints assigned to your department.",
+      subtitle:
+        "Manage and resolve complaints assigned to your department.",
       emailLabel: "Employee email",
       placeholder: "employee@urbansathi.com",
       button: "Sign in as Employee",
@@ -753,7 +773,8 @@ export default function UnifiedLoginPage() {
     },
     ADMIN: {
       title: "Administration Portal",
-      subtitle: "Oversee departments, city staff, and municipal metrics.",
+      subtitle:
+        "Oversee departments, city staff, and municipal metrics.",
       emailLabel: "Administrator email",
       placeholder: "admin@urbansathi.com",
       button: "Sign in as Admin",
@@ -765,19 +786,32 @@ export default function UnifiedLoginPage() {
 
   const selectedRole = roleDetails[role];
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const getApiBase = () =>
+    (
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      "http://localhost:5001"
+    ).replace(/\/+$/, "");
+
+  // Existing login flow — preserved.
+  const handleSubmit = async (
+    e: FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      const apiBase =
-        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5001";
-      const response = await fetch(`${apiBase}${selectedRole.endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
+      const response = await fetch(
+        `${getApiBase()}${selectedRole.endpoint}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
+        }
+      );
 
       const data = await response.json().catch(() => ({}));
 
@@ -789,10 +823,13 @@ export default function UnifiedLoginPage() {
       }
 
       if (!data.token) {
-        throw new Error("The server did not return an authentication token.");
+        throw new Error(
+          "The server did not return an authentication token."
+        );
       }
 
       const actualRole = data.user?.role as string | undefined;
+
       if (!actualRole || actualRole !== role) {
         throw new Error(
           actualRole
@@ -809,7 +846,10 @@ export default function UnifiedLoginPage() {
         sessionStorage.removeItem("employeeToken");
 
         if (data.user) {
-          localStorage.setItem("employeeUser", JSON.stringify(data.user));
+          localStorage.setItem(
+            "employeeUser",
+            JSON.stringify(data.user)
+          );
         }
       } else if (role === "ADMIN") {
         localStorage.setItem("adminToken", data.token);
@@ -819,10 +859,210 @@ export default function UnifiedLoginPage() {
       router.replace(selectedRole.destination);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Unable to connect to the server."
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to the server."
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openForgotPassword = () => {
+    setForgotMode(true);
+    setRecoveryStep("email");
+    setRecoveryOtp("");
+    setResetToken("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setRecoveryError("");
+    setRecoveryMessage("");
+    setError("");
+  };
+
+  const returnToLogin = () => {
+    setForgotMode(false);
+    setRecoveryStep("email");
+    setRecoveryOtp("");
+    setResetToken("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setRecoveryError("");
+    setRecoveryMessage("");
+    setPassword("");
+  };
+
+  // Step 1: Request an OTP for the citizen's Gmail address.
+  const handleRequestResetOtp = async (
+    e: FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setRecoveryError("");
+    setRecoveryMessage("");
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail.endsWith("@gmail.com")) {
+      setRecoveryError(
+        "Enter the Gmail address registered to your citizen account."
+      );
+      return;
+    }
+
+    setRecoveryLoading(true);
+
+    try {
+      const response = await fetch(
+        `${getApiBase()}/api/auth/forgot-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: normalizedEmail }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Could not request a reset code."
+        );
+      }
+
+      setEmail(normalizedEmail);
+      setRecoveryStep("otp");
+      setRecoveryMessage(
+        data.message ||
+          "If an eligible citizen account exists for that email, a reset code will be sent."
+      );
+    } catch (err) {
+      setRecoveryError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to the server."
+      );
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  // Step 2: Verify the OTP and receive the temporary reset token.
+  const handleVerifyResetOtp = async (
+    e: FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setRecoveryError("");
+    setRecoveryMessage("");
+
+    if (!/^\d{6}$/.test(recoveryOtp)) {
+      setRecoveryError(
+        "Enter the six-digit code from your email."
+      );
+      return;
+    }
+
+    setRecoveryLoading(true);
+
+    try {
+      const response = await fetch(
+        `${getApiBase()}/api/auth/verify-reset-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            otp: recoveryOtp,
+          }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Could not verify the code."
+        );
+      }
+
+      if (
+        typeof data.resetToken !== "string" ||
+        !data.resetToken
+      ) {
+        throw new Error(
+          "The server did not return a reset session. Please request a new code."
+        );
+      }
+
+      setResetToken(data.resetToken);
+      setRecoveryStep("password");
+      setRecoveryMessage(
+        "Email verified. Choose a new password."
+      );
+    } catch (err) {
+      setRecoveryError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to the server."
+      );
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  // Step 3: Submit the new password.
+  const handleResetPassword = async (
+    e: FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setRecoveryError("");
+    setRecoveryMessage("");
+
+    if (newPassword !== confirmNewPassword) {
+      setRecoveryError("The passwords do not match.");
+      return;
+    }
+
+    setRecoveryLoading(true);
+
+    try {
+      const response = await fetch(
+        `${getApiBase()}/api/auth/reset-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resetToken,
+            newPassword,
+            confirmPassword: confirmNewPassword,
+          }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Could not reset your password."
+        );
+      }
+
+      setRecoveryStep("done");
+      setRecoveryMessage(
+        data.message ||
+          "Password reset successfully. You can now sign in."
+      );
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setResetToken("");
+      setRecoveryOtp("");
+    } catch (err) {
+      setRecoveryError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to the server."
+      );
+    } finally {
+      setRecoveryLoading(false);
     }
   };
 
@@ -835,7 +1075,7 @@ export default function UnifiedLoginPage() {
 
   return (
     <main className="relative min-h-[400vh] bg-[#f6f9fc] selection:bg-[#0875c9] selection:text-white">
-      {/* 3D Background Canvas */}
+      {/* 3D Background Canvas — unchanged */}
       <canvas
         ref={canvasRef}
         aria-hidden="true"
@@ -848,16 +1088,17 @@ export default function UnifiedLoginPage() {
       {/* Top Header */}
       <header className="fixed inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-5 lg:px-16 backdrop-blur-md bg-white/50 border-b border-slate-200/40">
         <div className="flex items-center gap-3">
-          
           <span className="hidden text-xs font-semibold uppercase tracking-widest text-slate-500 sm:inline-block">
             Smart Municipal Network
           </span>
         </div>
+
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/20">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
             System Live
           </span>
+
           <button
             onClick={scrollToSignIn}
             className="rounded-full bg-[#0875c9] px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0b4f9c]"
@@ -867,9 +1108,8 @@ export default function UnifiedLoginPage() {
         </div>
       </header>
 
-      {/* STAGE 1: CLEAR 3D CITY + GUARD Speech Bubble (0% Scroll) */}
+      {/* STAGE 1: 3D CITY INTRO */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-end pb-16 text-center">
-        {/* Speech Bubble from Municipal Guard */}
         <div className="relative mb-6 rounded-2xl border border-white/90 bg-white/90 px-6 py-3.5 shadow-[0_15px_40px_rgba(10,40,80,0.12)] backdrop-blur-xl animate-bounce">
           <p className="text-xs font-bold text-[#10233f]">
             👮‍♂️ City Patrol: "Welcome to UrbanSathi! Scroll down to enter!"
@@ -885,7 +1125,7 @@ export default function UnifiedLoginPage() {
         </div>
       </section>
 
-      {/* STAGE 2: WELCOME HERO CARD (Scroll Screen 2) */}
+      {/* STAGE 2: WELCOME HERO CARD */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
         <div className="max-w-3xl rounded-3xl border border-white/80 bg-white/75 p-8 shadow-[0_20px_60px_rgba(10,40,80,0.1)] backdrop-blur-2xl sm:p-12">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#39b54a]/20 bg-[#e8f7ec] px-4 py-1.5">
@@ -894,9 +1134,11 @@ export default function UnifiedLoginPage() {
               UrbanSathi Platform
             </span>
           </div>
+
           <h1 className="text-4xl font-extrabold tracking-tight text-[#10233f] sm:text-6xl">
             Welcome to UrbanSathi
           </h1>
+
           <p className="mx-auto mt-4 max-w-xl text-base text-slate-600 sm:text-lg">
             One unified platform connecting citizens, municipal staff, and city leaders for a cleaner, smarter, better-managed city.
           </p>
@@ -912,16 +1154,18 @@ export default function UnifiedLoginPage() {
         </div>
       </section>
 
-      {/* STAGE 3: INTERACTIVE CIVIC METRICS (Scroll Screen 3) */}
+      {/* STAGE 3: CIVIC METRICS */}
       <section className="relative z-10 flex min-h-screen items-center justify-center px-6">
         <div className="w-full max-w-4xl rounded-3xl border border-white/80 bg-white/75 p-8 shadow-[0_25px_70px_rgba(10,40,80,0.1)] backdrop-blur-2xl sm:p-12">
           <div className="text-center">
             <span className="text-xs font-bold uppercase tracking-widest text-[#0875c9]">
               Real-Time Civic Infrastructure
             </span>
+
             <h2 className="mt-2 text-3xl font-extrabold text-[#10233f] sm:text-4xl">
               Smarter City Operations
             </h2>
+
             <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
               Explore how UrbanSathi streamlines municipal complaints, dispatches field employees, and maintains operational transparency.
             </p>
@@ -933,11 +1177,13 @@ export default function UnifiedLoginPage() {
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Resolution Rate</p>
               <p className="mt-1 text-[11px] text-slate-500">Over 12,000 resolved civic tickets</p>
             </div>
+
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
               <p className="text-3xl font-bold text-[#39b54a]">24/7</p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Dispatch</p>
               <p className="mt-1 text-[11px] text-slate-500">Automated employee routing</p>
             </div>
+
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
               <p className="text-3xl font-bold text-[#10233f]">15k+</p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Citizens</p>
@@ -947,14 +1193,21 @@ export default function UnifiedLoginPage() {
         </div>
       </section>
 
-      {/* STAGE 4: UNIFIED SIGN-IN PORTAL (Scroll Screen 4 - Bottom) */}
+      {/* STAGE 4: UNIFIED SIGN-IN PORTAL */}
       <section className="relative z-10 flex min-h-screen items-center justify-center px-5 py-20">
         <div className="w-full max-w-[460px] rounded-3xl border border-white/90 bg-white/90 p-6 shadow-[0_30px_90px_rgba(10,40,80,0.15)] backdrop-blur-2xl sm:p-8">
           <div className="mb-6 text-center">
-            <h2 className="text-2xl font-bold tracking-tight text-[#10233f]">Sign in to UrbanSathi</h2>
-            <p className="mt-1 text-xs text-slate-500">Choose your account type to continue</p>
+            <h2 className="text-2xl font-bold tracking-tight text-[#10233f]">
+              {forgotMode ? "Reset your password" : "Sign in to UrbanSathi"}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {forgotMode
+                ? "Citizen account recovery"
+                : "Choose your account type to continue"}
+            </p>
           </div>
 
+          {/* Role selector remains available; recovery is citizen-only. */}
           <div
             role="tablist"
             aria-label="Choose account type"
@@ -973,6 +1226,13 @@ export default function UnifiedLoginPage() {
                 onClick={() => {
                   setRole(value);
                   setError("");
+
+                  if (value !== "CITIZEN") {
+                    setForgotMode(false);
+                    setRecoveryStep("email");
+                    setRecoveryError("");
+                    setRecoveryMessage("");
+                  }
                 }}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold transition-all duration-200 ${
                   role === value
@@ -986,104 +1246,345 @@ export default function UnifiedLoginPage() {
           </div>
 
           <p className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs font-medium text-slate-600">
-            {selectedRole.subtitle}
+            {forgotMode
+              ? "Recover access to your citizen account using your registered Gmail address."
+              : selectedRole.subtitle}
           </p>
 
-          {error && (
-            <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700">
-              {error}
-            </div>
-          )}
+          {!forgotMode ? (
+            <>
+              {error && (
+                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700">
+                  {error}
+                </div>
+              )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label
-                htmlFor="login-email"
-                className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
-              >
-                {selectedRole.emailLabel}
-              </label>
-              <input
-                id="login-email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={selectedRole.placeholder}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
-              />
-            </div>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="login-email"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+                  >
+                    {selectedRole.emailLabel}
+                  </label>
 
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label
-                  htmlFor="login-password"
-                  className="text-xs font-semibold uppercase tracking-wider text-slate-600"
+                  <input
+                    id="login-email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={selectedRole.placeholder}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label
+                      htmlFor="login-password"
+                      className="text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    >
+                      Password
+                    </label>
+
+                    {role === "CITIZEN" && (
+                      <button
+                        type="button"
+                        onClick={openForgotPassword}
+                        className="text-xs font-medium text-[#0875c9] hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      id="login-password"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-11 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 hover:text-slate-600 focus:outline-none"
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="group relative mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-70"
                 >
-                  Password
-                </label>
-                <a
-                  href="/forgot-password"
-                  className="text-xs font-medium text-[#0875c9] hover:underline"
-                >
-                  Forgot password?
-                </a>
+                  {loading ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <>
+                      <span>{selectedRole.button}</span>
+                      <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {role === "CITIZEN" && (
+                <div className="mt-6 text-center">
+                  <p className="text-xs text-slate-500">
+                    Don't have an account?{" "}
+                    <a
+                      href="/register"
+                      className="font-semibold text-[#0875c9] hover:underline"
+                    >
+                      Create account
+                    </a>
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-4">
+              <div className="mb-1">
+                <h3 className="text-lg font-bold text-[#10233f]">
+                  {recoveryStep === "done"
+                    ? "Password updated"
+                    : "Reset citizen password"}
+                </h3>
+
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {recoveryStep === "email" &&
+                    "Enter the Gmail address registered to your citizen account."}
+                  {recoveryStep === "otp" &&
+                    "Enter the six-digit code sent to your email. The code expires after 10 minutes."}
+                  {recoveryStep === "password" &&
+                    "Choose a strong password with uppercase and lowercase letters, a number, and a special character."}
+                  {recoveryStep === "done" &&
+                    "Your password has been changed. You can now sign in with your new password."}
+                </p>
               </div>
-              <div className="relative">
-                <input
-                  id="login-password"
-                  type={showPassword ? "text" : "password"}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-11 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
-                />
+
+              {recoveryError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700"
+                >
+                  {recoveryError}
+                </div>
+              )}
+
+              {recoveryMessage && !recoveryError && (
+                <div
+                  role="status"
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 p-3.5 text-xs text-emerald-800"
+                >
+                  {recoveryMessage}
+                </div>
+              )}
+
+              {/* Step 1: Email */}
+              {recoveryStep === "email" && (
+                <form
+                  onSubmit={handleRequestResetOtp}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      htmlFor="recovery-email"
+                      className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    >
+                      Registered Gmail address
+                    </label>
+
+                    <input
+                      id="recovery-email"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@gmail.com"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading}
+                    className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition hover:brightness-105 disabled:opacity-70"
+                  >
+                    {recoveryLoading
+                      ? "Sending code..."
+                      : "Send reset code"}
+                  </button>
+                </form>
+              )}
+
+              {/* Step 2: OTP */}
+              {recoveryStep === "otp" && (
+                <form
+                  onSubmit={handleVerifyResetOtp}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      htmlFor="recovery-otp"
+                      className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    >
+                      Six-digit verification code
+                    </label>
+
+                    <input
+                      id="recovery-otp"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      required
+                      value={recoveryOtp}
+                      onChange={(e) =>
+                        setRecoveryOtp(
+                          e.target.value.replace(/\D/g, "").slice(0, 6)
+                        )
+                      }
+                      placeholder="123456"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm tracking-[0.35em] text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                    />
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      Code sent to {email}
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading}
+                    className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition hover:brightness-105 disabled:opacity-70"
+                  >
+                    {recoveryLoading
+                      ? "Verifying code..."
+                      : "Verify code"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={recoveryLoading}
+                    onClick={() => {
+                      setRecoveryStep("email");
+                      setRecoveryOtp("");
+                      setRecoveryError("");
+                      setRecoveryMessage("");
+                    }}
+                    className="w-full text-xs font-semibold text-[#0875c9] hover:underline disabled:opacity-60"
+                  >
+                    Change email address
+                  </button>
+                </form>
+              )}
+
+              {/* Step 3: New password */}
+              {recoveryStep === "password" && (
+                <form
+                  onSubmit={handleResetPassword}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      htmlFor="new-password"
+                      className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    >
+                      New password
+                    </label>
+
+                    <input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Create a strong password"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="confirm-new-password"
+                      className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    >
+                      Confirm new password
+                    </label>
+
+                    <input
+                      id="confirm-new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      value={confirmNewPassword}
+                      onChange={(e) =>
+                        setConfirmNewPassword(e.target.value)
+                      }
+                      placeholder="Re-enter your new password"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#10233f] placeholder-slate-400 shadow-sm transition focus:border-[#0875c9] focus:outline-none focus:ring-2 focus:ring-[#0875c9]/20"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading}
+                    className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition hover:brightness-105 disabled:opacity-70"
+                  >
+                    {recoveryLoading
+                      ? "Updating password..."
+                      : "Update password"}
+                  </button>
+                </form>
+              )}
+
+              {/* Step 4: Success */}
+              {recoveryStep === "done" && (
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 hover:text-slate-600 focus:outline-none"
+                  onClick={returnToLogin}
+                  className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition hover:brightness-105"
                 >
-                  {showPassword ? "Hide" : "Show"}
+                  Back to sign in
                 </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="group relative mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0b4f9c] to-[#0875c9] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(8,117,201,0.3)] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-70"
-            >
-              {loading ? (
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              ) : (
-                <>
-                  <span>{selectedRole.button}</span>
-                  <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
-                </>
               )}
-            </button>
-          </form>
 
-          {role === "CITIZEN" && (
-            <div className="mt-6 text-center">
-              <p className="text-xs text-slate-500">
-                Don't have an account?{" "}
-                <a href="/register" className="font-semibold text-[#0875c9] hover:underline">
-                  Create account
-                </a>
-              </p>
+              {recoveryStep !== "done" && (
+                <button
+                  type="button"
+                  onClick={returnToLogin}
+                  disabled={recoveryLoading}
+                  className="w-full text-xs font-semibold text-slate-500 hover:text-[#0875c9] disabled:opacity-60"
+                >
+                  Back to sign in
+                </button>
+              )}
             </div>
           )}
 
+          {/* Security footer */}
           <div className="mt-6 border-t border-slate-100 pt-4 text-center">
             <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
               <svg className="h-3 w-3 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
               </svg>
-              Your session is securely encrypted & protected
+              Your session is securely encrypted &amp; protected
             </p>
           </div>
         </div>

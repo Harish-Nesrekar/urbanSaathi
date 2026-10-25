@@ -89,6 +89,81 @@ async function sendVerificationEmail(email, otp) {
   }
 }
 
+
+async function sendPasswordResetEmail(email, otp) {
+  const sender = process.env.GOOGLE_EMAIL;
+
+  if (
+    !sender ||
+    !process.env.GOOGLE_CLIENT_ID ||
+    !process.env.GOOGLE_CLIENT_SECRET ||
+    !process.env.GOOGLE_REFRESH_TOKEN
+  ) {
+    throw new Error("Missing Gmail API environment variables");
+  }
+
+  const subject = "UrbanSathi Password Reset Code";
+  const text = [
+    `Your UrbanSathi password reset code is ${otp}.`,
+    "This code expires in 10 minutes.",
+    "If you did not request a password reset, ignore this email.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
+      <h2 style="color:#15803d">UrbanSathi</h2>
+      <p>Use this code to reset your password:</p>
+      <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:16px 0">
+        ${otp}
+      </div>
+      <p>This code expires in <strong>10 minutes</strong>.</p>
+      <p>If you did not request a password reset, you can safely ignore this email.</p>
+    </div>
+  `;
+
+  const boundary = "urbanSathiPasswordResetBoundary";
+
+  const message = [
+    `From: "UrbanSathi" <${sender}>`,
+    `To: ${email}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "",
+    text,
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    html,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+
+  try {
+    const response = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: {
+        raw: encodeEmail(message),
+      },
+    });
+
+    console.log("Gmail accepted password reset email:", response.data.id);
+    return response.data;
+  } catch (error) {
+    console.error("Gmail API password reset email error:", {
+      message: error.message,
+      status: error.response?.status,
+      details: error.response?.data?.error?.message,
+    });
+
+    throw new Error("Could not send password reset email");
+  }
+}
+
+
 async function verifyEmailConnection() {
   const profile = await gmail.users.getProfile({ userId: "me" });
   console.log("Gmail API connected:", profile.data.emailAddress);
@@ -97,5 +172,6 @@ async function verifyEmailConnection() {
 
 module.exports = {
   sendVerificationEmail,
+  sendPasswordResetEmail,
   verifyEmailConnection,
 };
