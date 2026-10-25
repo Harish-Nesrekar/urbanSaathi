@@ -765,18 +765,18 @@ export default function UnifiedLoginPage() {
       subtitle:
         "Manage and resolve complaints assigned to your department.",
       emailLabel: "Employee email",
-      placeholder: "employee@urbansathi.com",
+      placeholder: "employee@urbansaathi.com",
       button: "Sign in as Employee",
       endpoint: "/api/auth/employee-login",
       destination: "/employee/dashboard",
-      helper: "Authorized UrbanSathi department employees only.",
+      helper: "Authorized UrbanSaathi department employees only.",
     },
     ADMIN: {
       title: "Administration Portal",
       subtitle:
         "Oversee departments, city staff, and municipal metrics.",
       emailLabel: "Administrator email",
-      placeholder: "admin@urbansathi.com",
+      placeholder: "admin@urbansaathi.com",
       button: "Sign in as Admin",
       endpoint: "/api/auth/admin-login",
       destination: "/admin/dashboard",
@@ -1112,7 +1112,7 @@ export default function UnifiedLoginPage() {
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-end pb-16 text-center">
         <div className="relative mb-6 rounded-2xl border border-white/90 bg-white/90 px-6 py-3.5 shadow-[0_15px_40px_rgba(10,40,80,0.12)] backdrop-blur-xl animate-bounce">
           <p className="text-xs font-bold text-[#10233f]">
-            👮‍♂️ City Patrol: "Welcome to UrbanSathi! Scroll down to enter!"
+            👮‍♂️ City Patrol: "Welcome to UrbanSaathi! Scroll down to enter!"
           </p>
           <div className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-white/90 bg-white/90" />
         </div>
@@ -1131,12 +1131,12 @@ export default function UnifiedLoginPage() {
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#39b54a]/20 bg-[#e8f7ec] px-4 py-1.5">
             <span className="h-2 w-2 rounded-full bg-[#39b54a]" />
             <span className="text-xs font-bold uppercase tracking-widest text-[#16852b]">
-              UrbanSathi Platform
+              UrbanSaathi Platform
             </span>
           </div>
 
           <h1 className="text-4xl font-extrabold tracking-tight text-[#10233f] sm:text-6xl">
-            Welcome to UrbanSathi
+            Welcome to UrbanSaathi
           </h1>
 
           <p className="mx-auto mt-4 max-w-xl text-base text-slate-600 sm:text-lg">
@@ -1167,7 +1167,7 @@ export default function UnifiedLoginPage() {
             </h2>
 
             <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
-              Explore how UrbanSathi streamlines municipal complaints, dispatches field employees, and maintains operational transparency.
+              Explore how UrbanSaathi streamlines municipal complaints, dispatches field employees, and maintains operational transparency.
             </p>
           </div>
 
@@ -1198,7 +1198,7 @@ export default function UnifiedLoginPage() {
         <div className="w-full max-w-[460px] rounded-3xl border border-white/90 bg-white/90 p-6 shadow-[0_30px_90px_rgba(10,40,80,0.15)] backdrop-blur-2xl sm:p-8">
           <div className="mb-6 text-center">
             <h2 className="text-2xl font-bold tracking-tight text-[#10233f]">
-              {forgotMode ? "Reset your password" : "Sign in to UrbanSathi"}
+              {forgotMode ? "Reset your password" : "Sign in to UrbanSaathi"}
             </h2>
             <p className="mt-1 text-xs text-slate-500">
               {forgotMode

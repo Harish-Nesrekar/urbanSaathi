@@ -75,7 +75,7 @@ function LoadingScreen() {
           Verifying administrator access
         </h1>
         <p className="mt-2 text-sm text-[#7a887b]">
-          Securely preparing your UrbanSathi workspace…
+          Securely preparing your UrbanSaathi workspace…
         </p>
       </div>
     </main>
@@ -301,7 +301,7 @@ export default function AdminDashboard() {
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/90 bg-white/65 px-3.5 py-2 text-[11px] font-bold tracking-[0.12em] text-[#47784b] shadow-[0_5px_20px_-12px_rgba(48,86,53,0.3)] backdrop-blur-xl">
                 <span className="h-2 w-2 rounded-full bg-[#5d9b61] shadow-[0_0_0_4px_rgba(93,155,97,0.12)]" />
-                URBANSATHI ADMIN WORKSPACE
+                URBANSAATHI ADMIN WORKSPACE
               </div>
               <h1 className="mt-4 text-2xl font-bold tracking-tight text-[#203b29] sm:text-3xl">Good to see you, {greetingName.split(" ")[0]}.</h1>
               <p className="mt-2 max-w-xl text-sm leading-6 text-[#6e806f] sm:text-base">
@@ -441,7 +441,7 @@ export default function AdminDashboard() {
         </section>
 
                 <section className="scroll-mt-6 rounded-2xl border border-white/85 bg-white/55 p-3 shadow-[0_10px_35px_-28px_rgba(39,75,44,0.2)] backdrop-blur-xl transition-colors duration-200 sm:rounded-3xl sm:p-5">
-          <SectionHeading eyebrow="Recently joined" title="Recent citizens" description="A quick look at the latest citizen accounts registered on UrbanSathi." />
+          <SectionHeading eyebrow="Recently joined" title="Recent citizens" description="A quick look at the latest citizen accounts registered on UrbanSaathi." />
           <RecentCitizens
             citizens={overview?.recentCitizens ?? []}
             loading={overviewLoading}
