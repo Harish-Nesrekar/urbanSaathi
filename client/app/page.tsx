@@ -1343,7 +1343,7 @@ export default function UnifiedLoginPage() {
                   <p className="text-xs text-slate-500">
                     Don't have an account?{" "}
                     <a
-                      href="/register"
+                      href="/citizen/register"
                       className="font-semibold text-[#0875c9] hover:underline"
                     >
                       Create account
