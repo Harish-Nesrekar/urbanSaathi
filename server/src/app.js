@@ -4,6 +4,7 @@ const authRoutes = require("./routes/authRoutes");
 const testRoutes = require("./routes/testRoutes");
 const complaintRoutes = require("./routes/complaintRoutes");
 const profileRoutes = require("./routes/profileRoutes");
+const { getPublicStats } = require("./controllers/adminController");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -18,6 +19,7 @@ app.use("/api/test", testRoutes);
 app.use("/api/complaints", complaintRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/profile", profileRoutes);
+app.get("/api/stats", getPublicStats);
 
 app.get("/", (req, res) => {
   res.json({

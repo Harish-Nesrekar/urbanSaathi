@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import * as THREE from "three";
+import { fetchCivicStats, type CivicStats } from "../lib/civic-stats";
 
 /* =========================================================
    TYPES FOR 3D DIORAMA
@@ -744,8 +745,24 @@ export default function UnifiedLoginPage() {
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryError, setRecoveryError] = useState("");
   const [recoveryMessage, setRecoveryMessage] = useState("");
+  const [civicStats, setCivicStats] = useState<CivicStats | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    fetchCivicStats()
+      .then((stats) => {
+        if (isCurrent) setCivicStats(stats);
+      })
+      .catch(() => {
+        if (isCurrent) setCivicStats(null);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const roleDetails = {
     CITIZEN: {
@@ -785,6 +802,20 @@ export default function UnifiedLoginPage() {
   } as const;
 
   const selectedRole = roleDetails[role];
+  const totalComplaints = civicStats?.totalComplaints;
+  const resolvedComplaints = civicStats?.resolvedComplaints;
+  const hasComplaintData =
+    typeof totalComplaints === "number" &&
+    typeof resolvedComplaints === "number";
+  const resolutionRate =
+    hasComplaintData && totalComplaints > 0
+      ? `${Math.round((resolvedComplaints / totalComplaints) * 1000) / 10}%`
+      : "—";
+  const complaintSummary = !hasComplaintData
+    ? "Live complaint data unavailable"
+    : totalComplaints === 0
+      ? "No complaints recorded yet"
+      : `${resolvedComplaints.toLocaleString()} of ${totalComplaints.toLocaleString()} complaints resolved`;
 
   const getApiBase = () =>
     (
@@ -1173,21 +1204,29 @@ export default function UnifiedLoginPage() {
 
           <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
-              <p className="text-3xl font-bold text-[#0875c9]">98.4%</p>
+              <p className="text-3xl font-bold text-[#0875c9]">{resolutionRate}</p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Resolution Rate</p>
-              <p className="mt-1 text-[11px] text-slate-500">Over 12,000 resolved civic tickets</p>
+              <p className="mt-1 text-[11px] text-slate-500">{complaintSummary}</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
-              <p className="text-3xl font-bold text-[#39b54a]">24/7</p>
-              <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Dispatch</p>
-              <p className="mt-1 text-[11px] text-slate-500">Automated employee routing</p>
-            </div>
+            <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 text-center shadow-sm">
+  <p className="text-3xl font-bold text-[#39b54a]">
+    {civicStats?.activeEmployees.toLocaleString() ?? "—"}
+  </p>
+  <p className="mt-1 text-xs font-semibold text-[#10233f]">
+    Active Employees
+  </p>
+  <p className="mt-1 text-[11px] text-slate-500">
+    Employees with active accounts
+  </p>
+</div>
 
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
-              <p className="text-3xl font-bold text-[#10233f]">15k+</p>
+              <p className="text-3xl font-bold text-[#10233f]">
+                {civicStats?.activeCitizens.toLocaleString() ?? "—"}
+              </p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Citizens</p>
-              <p className="mt-1 text-[11px] text-slate-500">Engaged urban community</p>
+              <p className="mt-1 text-[11px] text-slate-500">Currently active citizen accounts</p>
             </div>
           </div>
         </div>

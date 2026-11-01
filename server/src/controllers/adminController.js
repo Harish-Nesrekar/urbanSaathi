@@ -126,6 +126,53 @@ exports.getOverview = async (req, res) => {
 };
 
 
+exports.getPublicStats = async (_req, res) => {
+  try {
+    // Count verified citizens who logged in during the last 30 days.
+    const [citizenRows] = await db.query(`
+      SELECT COUNT(*) AS total
+      FROM citizens c
+      INNER JOIN users u ON u.id = c.user_id
+      WHERE u.role = 'CITIZEN'
+        AND u.status = 'ACTIVE'
+        AND u.email_verified = 1
+        AND u.last_login >= NOW() - INTERVAL 30 DAY
+    `);
+
+    // Count all complaints and only those currently marked RESOLVED.
+    const [complaintRows] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'RESOLVED' THEN 1 ELSE 0 END) AS resolved
+      FROM complaints
+    `);
+
+    // Count employees with active employee records and active user accounts.
+    const [employeeRows] = await db.query(`
+      SELECT COUNT(*) AS total
+      FROM employees e
+      INNER JOIN users u ON u.id = e.user_id
+      WHERE e.is_active = 1
+        AND u.status = 'ACTIVE'
+        AND u.role = 'EMPLOYEE'
+    `);
+
+    return res.status(200).json({
+      activeCitizens: Number(citizenRows[0]?.total || 0),
+      totalComplaints: Number(complaintRows[0]?.total || 0),
+      resolvedComplaints: Number(complaintRows[0]?.resolved || 0),
+      activeEmployees: Number(employeeRows[0]?.total || 0),
+    });
+  } catch (error) {
+    console.error("Public stats error:", error.message);
+
+    return res.status(500).json({
+      message: "Unable to load public statistics",
+    });
+  }
+};
+
+
 exports.createEmployee = async (req, res) => {
   let connection;
 

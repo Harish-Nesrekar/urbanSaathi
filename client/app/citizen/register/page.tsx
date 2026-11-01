@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import * as THREE from "three";
+import { fetchCivicStats, type CivicStats } from "../../../lib/civic-stats";
 
 /* =========================================================
    TYPES FOR 3D DIORAMA
@@ -737,6 +738,7 @@ export default function CitizenRegister() {
   const [otp, setOtp] = useState("");
   const [resendLoading, setResendLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [civicStats, setCivicStats] = useState<CivicStats | null>(null);
 
   const passwordChecks = {
     length: password.length >= 8,
@@ -749,6 +751,37 @@ export default function CitizenRegister() {
 
   const isStrongPassword = Object.values(passwordChecks).every(Boolean);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    fetchCivicStats()
+      .then((stats) => {
+        if (isCurrent) setCivicStats(stats);
+      })
+      .catch(() => {
+        if (isCurrent) setCivicStats(null);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  const totalComplaints = civicStats?.totalComplaints;
+  const resolvedComplaints = civicStats?.resolvedComplaints;
+  const hasComplaintData =
+    typeof totalComplaints === "number" &&
+    typeof resolvedComplaints === "number";
+  const resolutionRate =
+    hasComplaintData && totalComplaints > 0
+      ? `${Math.round((resolvedComplaints / totalComplaints) * 1000) / 10}%`
+      : "—";
+  const complaintSummary = !hasComplaintData
+    ? "Live complaint data unavailable"
+    : totalComplaints === 0
+      ? "No complaints recorded yet"
+      : `${resolvedComplaints.toLocaleString()} of ${totalComplaints.toLocaleString()} complaints resolved`;
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -969,9 +1002,9 @@ export default function CitizenRegister() {
 
           <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
-              <p className="text-3xl font-bold text-[#0875c9]">98.4%</p>
+              <p className="text-3xl font-bold text-[#0875c9]">{resolutionRate}</p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Resolution Rate</p>
-              <p className="mt-1 text-[11px] text-slate-500">Over 12,000 resolved civic tickets</p>
+              <p className="mt-1 text-[11px] text-slate-500">{complaintSummary}</p>
             </div>
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
               <p className="text-3xl font-bold text-[#39b54a]">24/7</p>
@@ -979,9 +1012,11 @@ export default function CitizenRegister() {
               <p className="mt-1 text-[11px] text-slate-500">Direct response from city departments</p>
             </div>
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-6 shadow-sm text-center">
-              <p className="text-3xl font-bold text-[#10233f]">15k+</p>
+              <p className="text-3xl font-bold text-[#10233f]">
+                {civicStats?.activeCitizens.toLocaleString() ?? "—"}
+              </p>
               <p className="mt-1 text-xs font-semibold text-[#10233f]">Active Citizens</p>
-              <p className="mt-1 text-[11px] text-slate-500">Engaged urban community</p>
+              <p className="mt-1 text-[11px] text-slate-500">Currently active citizen accounts</p>
             </div>
           </div>
         </div>

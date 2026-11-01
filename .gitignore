@@ -25,3 +25,5 @@ server/uploads/*
 
 # Local Google OAuth credentials
 server/client_secret_*.json
+# Local database certificates
+server/certs/
