@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Urbansaathi",
   description: "Urbansaathi is a platform that connects citizens with their local government, enabling them to report issues, access resources, and stay informed about community initiatives.",
+  verification: {
+    google: "hg8rKvYnIdUXH5PnWtl2AIJz7VfcRAsQ4akNf0Kc710",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
